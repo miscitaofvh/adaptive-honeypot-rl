@@ -1,0 +1,90 @@
+services:
+  haproxy:
+    image: haproxy:2.9-alpine
+    ports:
+      - "8080:80"
+      - "8404:8404"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy/maps:/etc/haproxy/maps
+      - haproxy_sock:/var/run/haproxy
+    depends_on:
+      - frontend
+      - backend
+      - sqli_pot
+      - ssti_pot
+      - cmdi_pot
+      - ssrf_pot
+    networks:
+      - web_net
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    networks:
+      - web_net
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      - SECRET_KEY=dev-secret-meridian-2024
+      - DATABASE_URL=sqlite:////data/meridian.db
+      - SERVICE_NAME=normal
+    volumes:
+      - backend_data:/data
+    networks:
+      - web_net
+    restart: unless-stopped
+
+  sqli_pot:
+    build:
+      context: ./honeypots
+      dockerfile: sqli_pot/Dockerfile
+    environment:
+      - SERVICE_NAME=sqli_pot
+      - POT_TYPE=sqli
+    networks:
+      - web_net
+    restart: unless-stopped
+
+  ssti_pot:
+    build:
+      context: ./honeypots
+      dockerfile: ssti_pot/Dockerfile
+    environment:
+      - SERVICE_NAME=ssti_pot
+      - POT_TYPE=ssti
+    networks:
+      - web_net
+    restart: unless-stopped
+
+  cmdi_pot:
+    build:
+      context: ./honeypots
+      dockerfile: cmdi_pot/Dockerfile
+    environment:
+      - SERVICE_NAME=cmdi_pot
+      - POT_TYPE=cmdi
+    networks:
+      - web_net
+    restart: unless-stopped
+
+  ssrf_pot:
+    build:
+      context: ./honeypots
+      dockerfile: ssrf_pot/Dockerfile
+    environment:
+      - SERVICE_NAME=ssrf_pot
+      - POT_TYPE=ssrf
+    networks:
+      - web_net
+    restart: unless-stopped
+
+networks:
+  web_net:
+    driver: bridge
+
+volumes:
+  backend_data:
+  haproxy_sock:
