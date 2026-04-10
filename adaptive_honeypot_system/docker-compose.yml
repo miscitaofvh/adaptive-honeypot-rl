@@ -1,0 +1,246 @@
+services:
+  # ============================================================
+  # GATEWAY - Unified L4/L7 Proxy with Advanced Logging
+  # ============================================================
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: adaptive-gateway
+    ports:
+      - "80:80"
+      - "8404:8404"
+    volumes:
+      - haproxy_maps:/etc/haproxy/maps
+      - haproxy_sock:/var/run/haproxy
+    depends_on:
+      - frontend
+      - backend
+      - cmdi_pot
+      - sqli_pot
+      - ssti_pot
+      - ssrf_pot
+    networks:
+      - adaptive_net
+    environment:
+      - TZ=UTC
+      - TEST_HONEYPOT=${TEST_HONEYPOT:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8404/stats"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Real Service - Normal Backend
+  backend:
+    build:
+      context: ./real_service/backend
+      dockerfile: Dockerfile
+    container_name: adaptive-backend
+    environment:
+      - SERVICE_NAME=real-backend
+      - SECRET_KEY=${BACKEND_SECRET_KEY:-dev-secret-adaptive-2024}
+      - DATABASE_URL=sqlite:////data/meridian.db
+      - FLASK_ENV=production
+    volumes:
+      - backend_data:/data
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Real Service - Frontend (React + Nginx)
+  frontend:
+    build:
+      context: ./real_service/frontend
+      dockerfile: Dockerfile
+    container_name: adaptive-frontend
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Honeypots - Individual Detection Services
+  cmdi_pot:
+    build:
+      context: ./honeypots
+      dockerfile: cmdi_pot/Dockerfile
+    container_name: adaptive-cmdi-pot
+    ports:
+      - "5002:5000"
+    environment:
+      - SERVICE_NAME=cmdi-honeypot
+      - POT_TYPE=command-injection
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  sqli_pot:
+    build:
+      context: ./honeypots
+      dockerfile: sqli_pot/Dockerfile
+    container_name: adaptive-sqli-pot
+    ports:
+      - "5003:5000"
+    environment:
+      - SERVICE_NAME=sqli-honeypot
+      - POT_TYPE=sql-injection
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ssti_pot:
+    build:
+      context: ./honeypots
+      dockerfile: ssti_pot/Dockerfile
+    container_name: adaptive-ssti-pot
+    ports:
+      - "5004:5000"
+    environment:
+      - SERVICE_NAME=ssti-honeypot
+      - POT_TYPE=template-injection
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ssrf_pot:
+    build:
+      context: ./honeypots
+      dockerfile: ssrf_pot/Dockerfile
+    container_name: adaptive-ssrf-pot
+    ports:
+      - "5005:5000"
+    environment:
+      - SERVICE_NAME=ssrf-honeypot
+      - POT_TYPE=server-side-request-forgery
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================
+  # OBSERVABILITY - SIEM & Monitoring
+  # ============================================================
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: adaptive-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.watcher.enabled=false
+      - xpack.ml.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./observability/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    ports:
+      - "9200:9200"
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: curl -s http://localhost:9200 >/dev/null || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: adaptive-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=
+      - SERVER_NAME=kibana
+      - xpack.security.enabled=false
+      - xpack.watcher.enabled=false
+      - xpack.ml.enabled=false
+      - telemetry.enabled=false
+    volumes:
+      - ./observability/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    ports:
+      - "5601:5601"
+    networks:
+      - adaptive_net
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+    healthcheck:
+      test: curl -s http://localhost:5601/app/kibana >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.11.0
+    container_name: adaptive-filebeat
+    user: root
+    volumes:
+      - ./observability/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - filebeat_data:/usr/share/filebeat/data
+    networks:
+      - adaptive_net
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+    command: filebeat -e -strict.perms=false
+    environment:
+      - ELASTICSEARCH_HOSTS=elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=
+    healthcheck:
+      test: filebeat test config
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ============================================================
+# NETWORKS & VOLUMES
+# ============================================================
+
+networks:
+  adaptive_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  backend_data:
+  haproxy_maps:
+  haproxy_sock:
+  elasticsearch_data:
+  filebeat_data:

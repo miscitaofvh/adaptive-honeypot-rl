@@ -1,0 +1,8 @@
+server.name: kibana
+server.host: 0.0.0.0
+server.port: 5601
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+xpack.security.enabled: false
+xpack.watcher.enabled: false
+xpack.ml.enabled: false
+telemetry.enabled: false

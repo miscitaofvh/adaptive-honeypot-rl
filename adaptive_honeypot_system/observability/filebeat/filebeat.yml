@@ -1,0 +1,94 @@
+filebeat.inputs:
+  # HAProxy Gateway Logs
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/haproxy.log
+      - /proc/sys/net/core/netdev_max_backlog
+    fields:
+      source: haproxy-gateway
+      component: gateway
+      environment: production
+    tags: ["haproxy", "proxy", "gateway"]
+    multiline.pattern: '^\['
+    multiline.negate: true
+    multiline.match: after
+    
+  # Backend Application Logs
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/backend/*.log
+      - /proc/*/fd/1  # stdout from containers
+    fields:
+      source: backend-service
+      component: real-service
+    tags: ["backend", "flask", "api"]
+    
+  # Honeypot Logs
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/honeypot/*.log
+    fields:
+      source: honeypot-detection
+      component: honeypot
+    tags: ["honeypot", "attack-detection", "alerts"]
+    
+  # System logs from containers
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/containers/*/*.log
+    fields:
+      source: container-logs
+    tags: ["docker", "containers"]
+
+processors:
+  # Add cloud metadata
+  - add_cloud_metadata: ~
+  
+  # Add Docker metadata
+  - add_docker_metadata:
+      host: "unix:///var/run/docker.sock"
+  
+  # Add host metadata
+  - add_host_metadata:
+      netinfo.enabled: true
+  
+  # Enrich logs with timestamp
+  - timestamp:
+      field: timestamp
+      layouts:
+        - unix_ms
+        - "2006-01-02T15:04:05Z07:00"
+        - iso8601
+  
+  # Decode JSON fields in logs
+  - decode_json_fields:
+      fields: 
+        - message
+      target: "json"
+      overwrite_keys: true
+
+output.elasticsearch:
+  enabled: true
+  hosts: ["elasticsearch:9200"]
+  index: "honeypot-logs-%{+yyyy.MM.dd}"
+  ilm.enabled: true
+  ilm.policy_name: "honeypot-retention"
+  pipeline: "honeypot-parsing"
+
+setup.template:
+  name: "honeypot-logs"
+  pattern: "honeypot-logs-*"
+  enabled: true
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
+
