@@ -1,42 +1,84 @@
 #!/usr/bin/env python3
 import requests
-import json
 
-BASE_URL = 'http://localhost:5000'
 
-# Test all 4 honeypots with attack payloads
-tests = [
-    ('sqli', '/api/articles/search', "' OR '1'='1"),
-    ('ssti', '/api/tools/preview', '{{7*7}}'),
-    ('ssrf', '/api/tools/fetch', 'http://127.0.0.1:8000'),
-    ('cmdi', '/api/tools/ping', '127.0.0.1;whoami'),
-]
-
-print("Testing honeypots with attack payloads:\n")
-for pot_id, endpoint, payload in tests:
+def _post(url, payload):
+    resp = requests.post(url, json=payload, timeout=5)
     try:
-        url = f"{BASE_URL}/api/honeypot/test/{pot_id}?endpoint={endpoint}&payload={payload}"
-        r = requests.post(url, timeout=5)
-        j = r.json()
-        status = "✅ DETECTED" if j.get('detected') else "❌ NOT DETECTED"
-        print(f"[{pot_id.upper():4}] {status} | Status: {j.get('status_code'):3} | Response: {str(j.get('response', {}))[:60]}...")
-    except Exception as e:
-        print(f"[{pot_id.upper():4}] ❌ ERROR: {str(e)}")
+        data = resp.json()
+    except Exception:
+        data = {}
+    return resp.status_code, data
 
-print("\n\nTesting honeypots with normal payloads (should NOT detect):\n")
-normal_tests = [
-    ('sqli', '/api/articles/search', 'python'),
-    ('ssti', '/api/tools/preview', 'hello world'),
-    ('ssrf', '/api/tools/fetch', 'https://example.com'),
-    ('cmdi', '/api/tools/ping', '127.0.0.1'),
-]
 
-for pot_id, endpoint, payload in normal_tests:
-    try:
-        url = f"{BASE_URL}/api/honeypot/test/{pot_id}?endpoint={endpoint}&payload={payload}"
-        r = requests.post(url, timeout=5)
-        j = r.json()
-        status = "✅ CLEAN" if not j.get('detected') else "❌ FALSE POSITIVE"
-        print(f"[{pot_id.upper():4}] {status} | Status: {j.get('status_code'):3}")
-    except Exception as e:
-        print(f"[{pot_id.upper():4}] ❌ ERROR: {str(e)}")
+def test_sqli():
+    base = "http://localhost:5003"
+    attack_status, attack_data = _post(f"{base}/api/articles/search", {"query": "' OR '1'='1"})
+    normal_status, normal_data = _post(f"{base}/api/articles/search", {"query": "python"})
+
+    attack_detected = attack_status >= 500 and "DatabaseError" in str(attack_data)
+    normal_clean = normal_status == 200 and isinstance(normal_data.get("items"), list)
+    return attack_detected, normal_clean, attack_status, normal_status
+
+
+def test_ssti():
+    base = "http://[::1]:5004"
+    attack_status, attack_data = _post(f"{base}/api/tools/preview", {"content": "{{7*7}}"})
+    normal_status, normal_data = _post(f"{base}/api/tools/preview", {"content": "hello world"})
+
+    attack_detected = attack_status == 200 and str(attack_data.get("rendered", "")).strip() == "49"
+    normal_clean = normal_status == 200 and "hello world" in str(normal_data.get("rendered", ""))
+    return attack_detected, normal_clean, attack_status, normal_status
+
+
+def test_ssrf():
+    base = "http://localhost:5005"
+    attack_status, attack_data = _post(f"{base}/api/tools/fetch", {"url": "http://169.254.169.254/latest/meta-data"})
+    normal_status, normal_data = _post(f"{base}/api/tools/fetch", {"url": "https://example.com"})
+
+    attack_detected = attack_status == 200 and "instanceId" in str(attack_data.get("content", ""))
+    normal_clean = normal_status == 200 and str(normal_data.get("content", "")).startswith("<html>")
+    return attack_detected, normal_clean, attack_status, normal_status
+
+
+def test_cmdi():
+    base = "http://localhost:5002"
+    attack_status, attack_data = _post(f"{base}/api/tools/ping", {"host": "127.0.0.1;whoami"})
+    normal_status, normal_data = _post(f"{base}/api/tools/ping", {"host": "127.0.0.1"})
+
+    attack_output = str(attack_data.get("output", ""))
+    normal_output = str(normal_data.get("output", ""))
+
+    attack_detected = attack_status == 200 and "www-data" in attack_output
+    normal_clean = normal_status == 200 and "www-data" not in normal_output
+    return attack_detected, normal_clean, attack_status, normal_status
+
+
+if __name__ == "__main__":
+    tests = [
+        ("SQLI", test_sqli),
+        ("SSTI", test_ssti),
+        ("SSRF", test_ssrf),
+        ("CMDI", test_cmdi),
+    ]
+
+    print("Testing honeypots with attack and normal payloads:\n")
+    failed = 0
+
+    for name, fn in tests:
+        try:
+            attack_detected, normal_clean, attack_status, normal_status = fn()
+            detect_mark = "PASS" if attack_detected else "FAIL"
+            clean_mark = "PASS" if normal_clean else "FAIL"
+            print(f"[{name}] attack_detected={detect_mark} (status={attack_status}) | normal_clean={clean_mark} (status={normal_status})")
+            if not attack_detected or not normal_clean:
+                failed += 1
+        except Exception as exc:
+            failed += 1
+            print(f"[{name}] ERROR: {exc}")
+
+    print("\nSummary:")
+    if failed == 0:
+        print("ALL TESTS PASSED")
+    else:
+        print(f"FAILED TEST CASES: {failed}")

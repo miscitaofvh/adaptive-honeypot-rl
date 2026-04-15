@@ -25,7 +25,11 @@ export const api = {
     request('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => { localStorage.removeItem('token'); localStorage.removeItem('user') },
   getArticles: (page = 1, category = '') =>
-    request(`/api/articles?page=${page}&limit=10${category ? `&category=${category}` : ''}`),
+    request(`/api/articles?page=${page}&limit=10${category ? `&category=${category}` : ''}`).then(data => {
+      if (Array.isArray(data.items)) return data
+      if (Array.isArray(data.articles)) return { ...data, items: data.articles }
+      return { ...data, items: [] }
+    }),
   getArticle: (id) => request(`/api/articles/${id}`),
   preview: (content) =>
     request('/api/tools/preview', { method: 'POST', body: JSON.stringify({ content }) }),

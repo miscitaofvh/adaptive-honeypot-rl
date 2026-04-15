@@ -3,6 +3,11 @@
 # Selects config based on TEST_HONEYPOT environment variable
 
 TEST_HONEYPOT=${TEST_HONEYPOT:-false}
+MAP_DIR="/etc/haproxy/maps"
+
+mkdir -p "$MAP_DIR"
+touch "$MAP_DIR/session_routes.map"
+touch "$MAP_DIR/ip_honeypot.map"
 
 # Choose config file based on TEST_HONEYPOT
 if [ "$TEST_HONEYPOT" = "true" ] || [ "$TEST_HONEYPOT" = "True" ] || [ "$TEST_HONEYPOT" = "TRUE" ]; then

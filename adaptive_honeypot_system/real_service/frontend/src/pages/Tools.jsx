@@ -81,7 +81,7 @@ function PingTool() {
         <div style={{ display:'flex', gap:20, padding:'10px 16px', borderBottom:'1px solid var(--border)', fontSize:12, fontFamily:'var(--font-mono)', color:'var(--text-muted)' }}>
           <span>{result.host}</span>
           <span style={{ color:result.reachable?'#6fcf8a':'#e06c75' }}>{result.reachable?'● Reachable':'● Unreachable'}</span>
-          {result.latency_ms&&<span>{result.latency_ms.toFixed(2)} ms avg</span>}
+          {result.latency_ms !== null && result.latency_ms !== undefined && <span>{result.latency_ms.toFixed(2)} ms avg</span>}
         </div>
         <Terminal text={result.output}/>
       </OutputBox>}

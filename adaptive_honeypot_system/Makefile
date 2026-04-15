@@ -4,6 +4,7 @@
 COMPOSE_FILE := docker-compose.yml
 PROJECT_NAME := adaptive-honeypot-rl
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
+GATEWAY_URL := http://localhost:8080
 
 # Colors for output
 CYAN := \033[0;36m
@@ -49,7 +50,8 @@ help:
 	@echo "  $(CYAN)test-api$(RESET)           Test API endpoint (/api/health)"
 	@echo "  $(CYAN)test-cmdi$(RESET)          Test command injection detection"
 	@echo "  $(CYAN)test-all$(RESET)           Run all tests"
-	@echo "  $(CYAN)test-routes$(RESET)        Test all API routes"
+	@echo "  $(CYAN)test-routes$(RESET)        Test core API routes"
+	@echo "  $(CYAN)test-honeypots$(RESET)     Run standalone honeypot detection script"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -143,7 +145,7 @@ mode-normal:
 	@$(DOCKER_COMPOSE) up -d --no-deps --build gateway
 	@echo "$(GREEN)✓ Gateway restarted in NORMAL mode (traffic → real backend)$(RESET)"
 	@sleep 3
-	@curl -s http://localhost/api/health || echo "Health check failed"
+	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
 
 mode-honeypot:
 	@echo "$(CYAN)[Switching to HONEYPOT mode (TEST_HONEYPOT=true)]$(RESET)"
@@ -152,7 +154,7 @@ mode-honeypot:
 	@$(DOCKER_COMPOSE) up -d --no-deps --build gateway
 	@echo "$(GREEN)✓ Gateway restarted in HONEYPOT mode (traffic → honeypots)$(RESET)"
 	@sleep 3
-	@curl -s http://localhost/api/health || echo "Health check failed"
+	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
 
 mode-show:
 	@echo "$(CYAN)Current mode:$(RESET)"
@@ -168,7 +170,7 @@ test-api:
 	@echo "$(CYAN)[Testing API endpoint...]$(RESET)"
 	@echo ""
 	@echo "$(YELLOW)Request: GET /api/health$(RESET)"
-	@curl -s http://localhost/api/health | jq . 2>/dev/null || curl -s http://localhost/api/health
+	@curl -s $(GATEWAY_URL)/api/health | jq . 2>/dev/null || curl -s $(GATEWAY_URL)/api/health
 	@echo ""
 
 test-cmdi:
@@ -177,10 +179,10 @@ test-cmdi:
 	@echo "$(YELLOW)Payload: {\"host\":\"127.0.0.1|whoami\"}$(RESET)"
 	@echo "$(YELLOW)Endpoint: POST /api/tools/ping$(RESET)"
 	@echo ""
-	@curl -s -X POST "http://localhost/api/tools/ping" \
+	@curl -s -X POST "$(GATEWAY_URL)/api/tools/ping" \
 		-H "Content-Type: application/json" \
 		-d '{"host":"127.0.0.1|whoami"}' | jq . 2>/dev/null || \
-	curl -s -X POST "http://localhost/api/tools/ping" \
+	curl -s -X POST "$(GATEWAY_URL)/api/tools/ping" \
 		-H "Content-Type: application/json" \
 		-d '{"host":"127.0.0.1|whoami"}'
 	@echo ""
@@ -189,22 +191,31 @@ test-all: test-api test-cmdi
 	@echo "$(GREEN)✓ All tests completed$(RESET)"
 
 test-routes:
-	@echo "$(CYAN)[Testing All API Routes...]$(RESET)"
+	@echo "$(CYAN)[Testing Core API Routes...]$(RESET)"
 	@echo ""
-	@echo "$(YELLOW)1. Health Check:$(RESET)"
-	@curl -s http://localhost/api/health | jq -r '.service' 2>/dev/null || curl -s http://localhost/api/health
+	@echo "$(YELLOW)1. Health Check (/api/health):$(RESET)"
+	@curl -s $(GATEWAY_URL)/api/health | jq -r '.service' 2>/dev/null || curl -s $(GATEWAY_URL)/api/health
 	@echo ""
-	@echo "$(YELLOW)2. Another request (load-balance test):$(RESET)"
-	@curl -s http://localhost/api/health | jq -r '.service' 2>/dev/null || curl -s http://localhost/api/health
+	@echo "$(YELLOW)2. Article List (/api/articles):$(RESET)"
+	@curl -s "$(GATEWAY_URL)/api/articles?page=1&limit=2" | jq . 2>/dev/null || curl -s "$(GATEWAY_URL)/api/articles?page=1&limit=2"
 	@echo ""
-	@echo "$(YELLOW)3. Third request (verify round-robin):$(RESET)"
-	@curl -s http://localhost/api/health | jq -r '.service' 2>/dev/null || curl -s http://localhost/api/health
+	@echo "$(YELLOW)3. Tools Preview (/api/tools/preview):$(RESET)"
+	@curl -s -X POST "$(GATEWAY_URL)/api/tools/preview" \
+		-H "Content-Type: application/json" \
+		-d '{"content":"hello world"}' | jq . 2>/dev/null || \
+	curl -s -X POST "$(GATEWAY_URL)/api/tools/preview" \
+		-H "Content-Type: application/json" \
+		-d '{"content":"hello world"}'
 	@echo ""
+
+test-honeypots:
+	@echo "$(CYAN)[Running standalone honeypot tests...]$(RESET)"
+	@python ../test_honeypots.py
 
 ## Shell access
 shell-backend:
 	@echo "$(CYAN)[Opening shell in backend container...]$(RESET)"
-	$(DOCKER_COMPOSE) exec backend /bin/bash
+	$(DOCKER_COMPOSE) exec backend /bin/sh
 
 shell-gateway:
 	@echo "$(CYAN)[Opening shell in gateway container...]$(RESET)"
@@ -212,7 +223,7 @@ shell-gateway:
 
 shell-cmdi:
 	@echo "$(CYAN)[Opening shell in CMDi honeypot...]$(RESET)"
-	$(DOCKER_COMPOSE) exec cmdi_pot /bin/bash
+	$(DOCKER_COMPOSE) exec cmdi_pot /bin/sh
 
 ## Health checks
 health:
@@ -222,16 +233,18 @@ health:
 	@curl -s -I http://localhost:8404/stats 2>&1 | head -1 || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Backend:$(RESET)"
-	@curl -s http://localhost:5000/api/health | jq -r '.service' 2>/dev/null || echo "❌ Unreachable"
+	@curl -s $(GATEWAY_URL)/api/health | jq -r '.service' 2>/dev/null || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Frontend:$(RESET)"
-	@curl -s -I http://localhost:3000 2>&1 | head -1 || echo "❌ Unreachable"
+	@curl -s -I $(GATEWAY_URL) 2>&1 | head -1 || echo "❌ Unreachable"
 	@echo ""
-	@echo "$(YELLOW)Honeypots (via gateway):$(RESET)"
-	@for i in 1 2 3 4; do \
-		service=$$(curl -s http://localhost/api/health | jq -r '.service' 2>/dev/null); \
+	@echo "$(YELLOW)Honeypots (direct ports):$(RESET)"
+	@for p in 5002 5003 5004 5005; do \
+		service=$$(curl -s "http://localhost:$$p/api/health" | jq -r '.service' 2>/dev/null); \
 		if [ -n "$$service" ]; then \
-			echo "  • Port 80 → $$service"; \
+			echo "  • Port $$p → $$service"; \
+		else \
+			echo "  • Port $$p → unreachable"; \
 		fi; \
 	done
 	@echo ""
@@ -266,9 +279,9 @@ info:
 	@echo "$(CYAN)╚════════════════════════════════════════════════════════════╝$(RESET)"
 	@echo ""
 	@echo "$(YELLOW)Services:$(RESET)"
-	@echo "  • Gateway (HAProxy).......... http://localhost:80"
-	@echo "  • Frontend (React).......... http://localhost:3000"
-	@echo "  • Backend API............... http://localhost:5000"
+	@echo "  • Gateway (HAProxy).......... http://localhost:8080"
+	@echo "  • Frontend (via Gateway).... http://localhost:8080"
+	@echo "  • Backend API (via Gateway). http://localhost:8080/api/*"
 	@echo "  • CMDi Honeypot............. http://localhost:5002"
 	@echo "  • SQLi Honeypot............. http://localhost:5003"
 	@echo "  • SSTI Honeypot............. http://localhost:5004"

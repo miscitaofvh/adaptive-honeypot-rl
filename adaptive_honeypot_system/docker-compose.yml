@@ -9,7 +9,7 @@ services:
       dockerfile: Dockerfile
     container_name: adaptive-gateway
     ports:
-      - "80:80"
+      - "8080:80"
       - "8404:8404"
     volumes:
       - haproxy_maps:/etc/haproxy/maps
@@ -183,7 +183,7 @@ services:
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
     healthcheck:
-      test: filebeat test config
+      test: filebeat test config -c /usr/share/filebeat/filebeat.yml -strict.perms=false
       interval: 30s
       timeout: 10s
       retries: 3
@@ -197,7 +197,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.22.0.0/16
 
 volumes:
   backend_data:

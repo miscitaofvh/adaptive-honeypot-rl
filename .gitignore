@@ -2,3 +2,5 @@
 node_modules/
 proposal.md
 .venv
+.vscode/
+__pycache__/

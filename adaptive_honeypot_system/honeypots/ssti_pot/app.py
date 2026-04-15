@@ -26,12 +26,13 @@ def me(): return jsonify(message='Unauthorized.'),401
 @app.get('/api/articles')
 def list_articles():
     cat=request.args.get('category',''); hit,p=_any([cat])
-    return (jsonify(_resp(p)),200) if hit else jsonify(articles=ARTICLES,total=len(ARTICLES),page=1,pages=1)
+    items=[a for a in ARTICLES if not cat or a['category'].lower()==cat.lower()]
+    return (jsonify(_resp(p)),200) if hit else jsonify(items=items,total=len(items),page=1,pages=1)
 @app.post('/api/articles/search')
 def search():
     d=request.get_json(silent=True) or {}; q=d.get('query',''); hit,p=_any([q])
     if hit: return jsonify(_resp(p)),200
-    m=[a for a in ARTICLES if q.lower() in a['title'].lower()]; return jsonify(articles=m,total=len(m),page=1,pages=1)
+    m=[a for a in ARTICLES if q.lower() in a['title'].lower()]; return jsonify(items=m,total=len(m),page=1,pages=1)
 @app.get('/api/articles/<aid>')
 def get_article(aid):
     hit,p=_any([aid])

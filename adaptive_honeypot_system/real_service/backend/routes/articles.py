@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models import Article, User, db
+from models import Article, db
 
 articles_bp = Blueprint('articles', __name__)
 
@@ -36,14 +36,36 @@ def create_article():
     def _create():
         user_id = get_jwt_identity()
         data = request.get_json(silent=True) or {}
+
+        title = (data.get('title') or '').strip()
+        summary = (data.get('summary') or '').strip()
+        content = (data.get('content') or '').strip()
+
+        if not title:
+            return jsonify(message='title is required'), 400
+        if not summary:
+            return jsonify(message='summary is required'), 400
+        if not content:
+            return jsonify(message='content is required'), 400
+
+        tags = data.get('tags', '')
+        if isinstance(tags, list):
+            tags = ','.join(str(tag).strip() for tag in tags if str(tag).strip())
+
+        try:
+            read_time = int(data.get('read_time', 5))
+        except (TypeError, ValueError):
+            read_time = 5
+
+        read_time = max(1, min(read_time, 120))
         
         article = Article(
-            title=data.get('title','').strip(),
-            summary=data.get('summary','').strip(),
-            content=data.get('content','').strip(),
+            title=title,
+            summary=summary,
+            content=content,
             category=data.get('category','General'),
-            tags=data.get('tags',''),
-            read_time=data.get('read_time',5),
+            tags=tags,
+            read_time=read_time,
             author_id=user_id
         )
         db.session.add(article)

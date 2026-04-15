@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../api/client.js'
 
@@ -20,7 +20,7 @@ export default function ArticleDetail() {
   return (
     <main style={{ padding: '48px 0 80px' }}>
       <div className="container" style={{ maxWidth: 720 }}>
-        <a href="/articles" style={{ color: 'var(--text-muted)' }}>← Back to Articles</a>
+        <Link to="/articles" style={{ color: 'var(--text-muted)' }}>← Back to Articles</Link>
         <h1 style={{ marginTop: 24 }}>{article.title}</h1>
         <div style={{ display: 'flex', gap: 16, marginBottom: 32, color: 'var(--text-muted)', fontSize: 14 }}>
           <span>👤 {article.author?.username}</span>
