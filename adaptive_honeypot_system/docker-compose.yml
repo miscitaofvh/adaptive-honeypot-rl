@@ -27,11 +27,6 @@ services:
       - TZ=UTC
       - TEST_HONEYPOT=${TEST_HONEYPOT:-false}
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8404/stats"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # Real Service - Normal Backend
   backend:
@@ -41,7 +36,7 @@ services:
     container_name: adaptive-backend
     environment:
       - SERVICE_NAME=real-backend
-      - SECRET_KEY=${BACKEND_SECRET_KEY:-dev-secret-adaptive-2024}
+      - SECRET_KEY=${BACKEND_SECRET_KEY}
       - DATABASE_URL=sqlite:////data/meridian.db
       - FLASK_ENV=production
     volumes:
@@ -49,11 +44,6 @@ services:
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # Real Service - Frontend (React + Nginx)
   frontend:
@@ -64,11 +54,6 @@ services:
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # Honeypots - Individual Detection Services
   cmdi_pot:
@@ -84,11 +69,6 @@ services:
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   sqli_pot:
     build:
@@ -103,11 +83,6 @@ services:
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   ssti_pot:
     build:
@@ -122,11 +97,6 @@ services:
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   ssrf_pot:
     build:
@@ -141,11 +111,6 @@ services:
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # ============================================================
   # OBSERVABILITY - SIEM & Monitoring
@@ -158,7 +123,6 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - xpack.watcher.enabled=false
-      - xpack.ml.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
@@ -178,14 +142,11 @@ services:
     image: docker.elastic.co/kibana/kibana:8.11.0
     container_name: adaptive-kibana
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=
+      - ELASTICSEARCH_HOSTS=http://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
       - SERVER_NAME=kibana
       - xpack.security.enabled=false
-      - xpack.watcher.enabled=false
-      - xpack.ml.enabled=false
       - telemetry.enabled=false
+      - NODE_OPTIONS=--max-old-space-size=512
     volumes:
       - ./observability/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
     ports:
@@ -218,9 +179,9 @@ services:
     restart: unless-stopped
     command: filebeat -e -strict.perms=false
     environment:
-      - ELASTICSEARCH_HOSTS=elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=
+      - ELASTICSEARCH_HOSTS=${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
     healthcheck:
       test: filebeat test config
       interval: 30s
