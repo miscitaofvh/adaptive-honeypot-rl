@@ -242,3 +242,4 @@ Mặc định trong plan hiện tại: control_plane và RL chưa có implementa
 
 - Scope hiện tại đang ưu tiên data plane demo và manual validation.
 - Nếu bắt đầu phase control plane + RL, nên tách milestone nhỏ và chốt contract JSON giữa các module trước.
+  
