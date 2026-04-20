@@ -1,45 +1,45 @@
-# Huong dan RL Training va Thuat toan
+# Hướng dẫn RL Training và Thuật toán
 
-Tai lieu nay mo ta:
-- Cach chay pipeline train RL offline.
-- Thuat toan RL hien dang dung.
-- Cach test routing controller trong Docker Compose.
+Tài liệu này mô tả:
+- Cách chạy pipeline train RL offline.
+- Thuật toán RL hiện đang dùng.
+- Cách test routing controller trong Docker Compose.
 
-## 0) Nguyen tac control plane bat dong bo
+## 0) Nguyên tắc control plane bất đồng bộ
 
-Stack tuan theo kien truc de xuat:
-- Data plane (`gateway` + cac service) phuc vu request truc tiep.
-- Control plane (`routing_controller`, RL model, va sau nay la LLM analyzer) cap nhat route map bat dong bo.
+Stack tuân theo kiến trúc đề xuất:
+- Data plane (`gateway` + các service) phục vụ request trực tiếp.
+- Control plane (`routing_controller`, RL model, và sau này là LLM analyzer) cập nhật route map bất đồng bộ.
 
-Khong co phu thuoc dong bo tu request path vao inference cua control plane,
-nen traffic web khong bi chan khi control plane cham hoac restart.
+Không có phụ thuộc đồng bộ từ request path vào inference của control plane,
+nên traffic web không bị chặn khi control plane chậm hoặc restart.
 
-## 1) Pham vi component
+## 1) Phạm vi component
 
-Pham vi control plane hien tai (chua tinh LLM analyzer):
+Phạm vi control plane hiện tại (chưa tính LLM analyzer):
 - `control_plane/rl_agent/generate_fake_data.py`
 - `control_plane/rl_agent/train_offline.py`
 - `control_plane/rl_agent/agent.py`
 - `control_plane/routing_controller/main.py`
 
-`routing_controller` da duoc wiring trong `docker-compose.yml`.
+`routing_controller` đã được wiring trong `docker-compose.yml`.
 
-## 2) Chinh sach phu thuoc (quan trong)
+## 2) Chính sách phụ thuộc (quan trọng)
 
-- PyTorch chi dung de train offline tren may local.
-- Tuyet doi khong cai `torch` trong Docker runtime cua he thong.
-- Runtime controller chi doc JSON weights (`LinearQAgent`) va khong phu thuoc torch.
-- Yeu cau local de train: `control_plane/rl_agent/requirements-local.txt`.
+- PyTorch chỉ dùng để train offline trên máy local.
+- Tuyệt đối không cài `torch` trong Docker runtime của hệ thống.
+- Runtime controller chỉ đọc JSON weights (`LinearQAgent`) và không phụ thuộc torch.
+- Yêu cầu local để train: `control_plane/rl_agent/requirements-local.txt`.
 
-## 3) Thiet ke state va action
+## 3) Thiết kế state và action
 
 ### State
-- Vector co dinh 24 chieu (`STATE_DIM = 24`), dong bo voi proposal.
-- Gom protocol one-hot, metrics session, payload signals, routing state, semantic-like features.
-- Generator dataset hien tai mo phong cac truong nay (chua phu thuoc LLM).
+- Vector cố định 24 chiều (`STATE_DIM = 24`), đồng bộ với proposal.
+- Gồm protocol one-hot, metrics session, payload signals, routing state, semantic-like features.
+- Generator dataset hiện tại mô phỏng các trường này (chưa phụ thuộc LLM).
 
 ### Action space
-Dinh nghia trong `agent.py`:
+Định nghĩa trong `agent.py`:
 - `0`: `KEEP_NORMAL`
 - `1`: `ROUTE_SQLI`
 - `2`: `ROUTE_SSTI`
@@ -50,33 +50,33 @@ Dinh nghia trong `agent.py`:
 - `7`: `ROUTE_SMTP`
 
 ### Protocol-based action masking
-Chi cho phep action hop le theo protocol:
+Chỉ cho phép action hợp lệ theo protocol:
 - HTTP: keep + SQLI/SSTI/CMDI/SSRF
 - SSH: keep + SSH honeypot
 - FTP: keep + FTP honeypot
 - SMTP: keep + SMTP honeypot
 
-Mask duoc enforce boi `allowed_action_indices()` khi inference va khi tinh training target.
+Mask được enforce bởi `allowed_action_indices()` khi inference và khi tính training target.
 
-## 4) Thuat toan RL hien tai
+## 4) Thuật toán RL hiện tại
 
-Implementation hien tai la offline Q-learning voi mo hinh tuyen tinh tren PyTorch:
+Implementation hiện tại là offline Q-learning với mô hình tuyến tính trên PyTorch:
 
-- Mo hinh: `Q(s, a) = w_a^T s + b_a`
-- Kien truc: `nn.Linear(24, 8)`
-- Toi uu: `AdamW` + weight decay (`l2`) + gradient clipping.
+- Mô hình: `Q(s, a) = w_a^T s + b_a`
+- Kiến trúc: `nn.Linear(24, 8)`
+- Tối ưu: `AdamW` + weight decay (`l2`) + gradient clipping.
 - Loss: `MSE(Q(s,a), target)`.
 
-Target cho tung transition `(s, a, r, s', done)`:
-- Neu `done`: `y = r`
-- Neu chua done:
+Target cho từng transition `(s, a, r, s', done)`:
+- Nếu `done`: `y = r`
+- Nếu chưa done:
   - `y = r + gamma * max_{a' hop le theo protocol(s')} Q(s', a')`
 
-Sau khi train, model duoc export ve JSON (`weights`, `bias`) de runtime controller su dung.
+Sau khi train, model được export về JSON (`weights`, `bias`) để runtime controller sử dụng.
 
-## 5) Setup moi truong train local
+## 5) Setup môi trường train local
 
-Tu root repo:
+Từ root repo:
 
 ```bash
 cd adaptive_honeypot_system/control_plane/rl_agent
@@ -85,11 +85,11 @@ source .venv/bin/activate
 pip install -r requirements-local.txt
 ```
 
-Luu y: buoc nay chi danh cho may local train offline, khong dung trong Docker runtime.
+Lưu ý: bước này chỉ dành cho máy local train offline, không dùng trong Docker runtime.
 
-## 6) Sinh du lieu offline
+## 6) Sinh dữ liệu offline
 
-Tu `adaptive_honeypot_system/`:
+Từ `adaptive_honeypot_system/`:
 
 ```bash
 python control_plane/rl_agent/generate_fake_data.py \
@@ -99,19 +99,19 @@ python control_plane/rl_agent/generate_fake_data.py \
   --output control_plane/rl_agent/data/fake_transitions.jsonl
 ```
 
-Hoac dung Makefile:
+Hoặc dùng Makefile:
 
 ```bash
 make gen-fake-data
 ```
 
-Output mong doi:
-- File JSONL, moi dong 1 transition.
-- Cac truong: `state`, `action`, `reward`, `next_state`, `done`, `protocol`, `optimal_action`.
+Output mong đợi:
+- File JSONL, mỗi dòng 1 transition.
+- Các trường: `state`, `action`, `reward`, `next_state`, `done`, `protocol`, `optimal_action`.
 
 ## 7) Train offline RL
 
-Tu `adaptive_honeypot_system/`:
+Từ `adaptive_honeypot_system/`:
 
 ```bash
 python control_plane/rl_agent/train_offline.py \
@@ -121,31 +121,31 @@ python control_plane/rl_agent/train_offline.py \
   --log-every 5
 ```
 
-Hoac dung Makefile:
+Hoặc dùng Makefile:
 
 ```bash
 make train-rl
 ```
 
-Sinh data + train trong 1 lenh:
+Sinh data + train trong 1 lệnh:
 
 ```bash
 make train-rl-fresh
 ```
 
-Tao dummy model de test split-route (HTTP luon vao SSTI):
+Tạo dummy model để test split-route (HTTP luôn vào SSTI):
 
 ```bash
 make make-dummy-model
 ```
 
-Artifact mong doi:
+Artifact mong đợi:
 - `control_plane/rl_agent/artifacts/rl_agent_linear.json`
 - `control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json`
 
 ## 8) Validate nhanh sau train
 
-### Kiem tra syntax
+### Kiểm tra syntax
 
 ```bash
 python -m py_compile \
@@ -155,18 +155,18 @@ python -m py_compile \
   control_plane/routing_controller/main.py
 ```
 
-### Kiem tra chat luong co ban
-Theo doi log train va metrics:
+### Kiểm tra chất lượng cơ bản
+Theo dõi log train và metrics:
 - `train_acc`
 - `val_acc`
 - `val_proxy_reward`
 
-Muc toi thieu:
-- Khong co runtime exception.
-- Co file metrics.
-- Validation accuracy on dinh, tot hon moc random.
+Mức tối thiểu:
+- Không có runtime exception.
+- Có file metrics.
+- Validation accuracy ổn định, tốt hơn mốc random.
 
-## 9) Chay va test routing controller trong stack
+## 9) Chạy và test routing controller trong stack
 
 ### Start stack
 
@@ -184,7 +184,7 @@ Endpoint routing controller:
 curl -s http://localhost:8001/health | jq .
 ```
 
-### Kiem tra torch khong co trong container runtime
+### Kiểm tra torch không có trong container runtime
 
 ```bash
 docker compose exec routing_controller python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
@@ -192,7 +192,7 @@ docker compose exec backend python -c "import importlib.util; print(importlib.ut
 docker compose exec cmdi_pot python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 ```
 
-Ket qua mong doi: deu `False`.
+Kết quả mong đợi: đều `False`.
 
 ### Reload model sau khi train
 
@@ -200,7 +200,7 @@ Ket qua mong doi: deu `False`.
 curl -s -X POST http://localhost:8001/model/reload | jq .
 ```
 
-### Route helper cho test tich hop
+### Route helper cho test tích hợp
 
 Set route theo session:
 
@@ -214,7 +214,7 @@ Set route theo source IP:
 curl -s -X POST "http://localhost:8001/route/ip/172.22.0.99?backend=ssti_api" | jq .
 ```
 
-### Test quyet dinh route HTTP
+### Test quyết định route HTTP
 
 ```bash
 curl -s -X POST http://localhost:8001/decide \
@@ -227,11 +227,11 @@ curl -s -X POST http://localhost:8001/decide \
   }' | jq .
 ```
 
-Mong doi:
-- Controller tra ve `action_name` va `backend`.
-- Neu `apply_route=true`, map se duoc cap nhat qua `routing_update.sh`.
+Mong đợi:
+- Controller trả về `action_name` và `backend`.
+- Nếu `apply_route=true`, map sẽ được cập nhật qua `routing_update.sh`.
 
-### Xoa route test thu cong
+### Xóa route test thủ công
 
 ```bash
 curl -s -X DELETE http://localhost:8001/route/session/sid_demo_001 | jq .
@@ -243,22 +243,22 @@ curl -s -X DELETE http://localhost:8001/route/session/sid_demo_001 | jq .
 make test-rl-split-ip
 ```
 
-Script se:
-- Ep gateway ve `TEST_HONEYPOT=false` (normal-first).
-- Tao dummy model va reload.
-- Tao 2 container client tam (IP khac nhau).
-- Chi apply route cho client A qua `POST /decide` voi `source_ip`.
-- Kiem tra ket qua split: A => `ssti-honeypot`, B => `real-backend`.
+Script sẽ:
+- Ép gateway về `TEST_HONEYPOT=false` (normal-first).
+- Tạo dummy model và reload.
+- Tạo 2 container client tạm (IP khác nhau).
+- Chỉ apply route cho client A qua `POST /decide` với `source_ip`.
+- Kiểm tra kết quả split: A => `ssti-honeypot`, B => `real-backend`.
 
-## 10) Gioi han hien tai
+## 10) Giới hạn hiện tại
 
-- `llm_analyzer` chua noi end-to-end, semantic features van la synthetic.
-- Mo hinh hien tai la linear Q approximation, chua phai DQN/BCQ day du.
-- Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) la placeholder cho giai doan L4.
-- Dataset hien tai synthetic; chat luong thuc te can du lieu tu log that.
+- `llm_analyzer` chưa nối end-to-end, semantic features vẫn là synthetic.
+- Mô hình hiện tại là linear Q approximation, chưa phải DQN/BCQ đầy đủ.
+- Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
+- Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.
 
-## 11) Huong phat trien tiep
+## 11) Hướng phát triển tiếp
 
-- Noi state builder that tu pipeline LLM/log.
-- Train tren replay buffer tach tu traffic logs.
-- Them integration test day du: `log ingest -> state build -> RL decide -> routing update`.
+- Nối state builder thật từ pipeline LLM/log.
+- Train trên replay buffer tách từ traffic logs.
+- Thêm integration test đầy đủ: `log ingest -> state build -> RL decide -> routing update`.

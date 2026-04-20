@@ -1,18 +1,18 @@
-# Bao cao tien do
+# Báo cáo tiến độ
 
-Cap nhat: 2026-04-20
+Cập nhật: 2026-04-20
 
-## 1) Tong quan hien tai
+## 1) Tổng quan hiện tại
 
-Du an da hoat dong du cho data plane + control plane trong web scope:
+Dự án đã hoạt động đủ cho data plane + control plane trong web scope:
 - Data plane: gateway HAProxy + real backend/frontend + 4 web honeypot.
-- Control plane: routing controller FastAPI chay runtime, cap nhat route map theo session/IP.
-- RL: da tach ro train offline (local) va runtime inference (container).
-- Observability: Filebeat -> Elasticsearch -> Kibana van hoat dong.
+- Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
+- RL: đã tách rõ train offline (local) và runtime inference (container).
+- Observability: Filebeat -> Elasticsearch -> Kibana vẫn hoạt động.
 
-Control plane tiep tuc duoc giu theo nguyen tac bat dong bo, khong chan request path.
+Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ, không chặn request path.
 
-## 2) Hang muc da hoan thanh
+## 2) Hạng mục đã hoàn thành
 
 ### Data plane
 - [x] Route theo 2 mode (`TEST_HONEYPOT=true|false`).
@@ -21,29 +21,29 @@ Control plane tiep tuc duoc giu theo nguyen tac bat dong bo, khong chan request 
   - `/api/tools/preview` -> SSTI
   - `/api/tools/fetch` -> SSRF
   - `/api/articles/search` -> SQLI
-- [x] `/api/health` route rieng ve real backend (`health_api`).
-- [x] Session map steering va source-IP map steering qua `routing_update.sh`.
+- [x] `/api/health` route riêng về real backend (`health_api`).
+- [x] Session map steering và source-IP map steering qua `routing_update.sh`.
 
 ### Control plane + RL
-- [x] `routing_controller` expose day du API: `/health`, `/model/reload`, `/decide`, add/remove route theo session/IP.
+- [x] `routing_controller` expose đầy đủ API: `/health`, `/model/reload`, `/decide`, add/remove route theo session/IP.
 - [x] Refactor train offline sang PyTorch trong `train_offline.py`.
-- [x] Them `requirements-local.txt` cho train local (`torch` local-only).
-- [x] Runtime controller van dung JSON linear weights (`LinearQAgent`), khong can torch trong container.
-- [x] Split-IP E2E `test_two_ip_split_routing.sh` pass (1 IP honeypot, 1 IP backend that).
+- [x] Thêm `requirements-local.txt` cho train local (`torch` local-only).
+- [x] Runtime controller vẫn dùng JSON linear weights (`LinearQAgent`), không cần torch trong container.
+- [x] Split-IP E2E `test_two_ip_split_routing.sh` pass (1 IP honeypot, 1 IP backend thật).
 
 ### Test harness
-- [x] `test_honeypots.py` o root repo hoat dong on dinh.
+- [x] `test_honeypots.py` ở root repo hoạt động ổn định.
 - [x] `make test-honeypots` pass.
-- [x] Da co fallback URL IPv6 (`::1`) cho SSTI trong script test de tranh timeout loopback IPv4.
+- [x] Đã có fallback URL IPv6 (`::1`) cho SSTI trong script test để tránh timeout loopback IPv4.
 
-### Repo hygiene (de push)
-- [x] Viet hoa tai lieu chinh (README, progress, RL guide).
-- [x] Don file phat sinh trong `rl_agent/data`, `rl_agent/artifacts`, `__pycache__`.
-- [x] Bo sung `.gitignore` de tranh commit nham data/model local va `.env.bak`.
+### Repo hygiene (để push)
+- [x] Việt hóa tài liệu chính (README, progress, RL guide).
+- [x] Dọn file phát sinh trong `rl_agent/data`, `rl_agent/artifacts`, `__pycache__`.
+- [x] Bổ sung `.gitignore` để tránh commit nhầm data/model local và `.env.bak`.
 
-## 3) Ket qua test da xac nhan
+## 3) Kết quả test đã xác nhận
 
-Da chay trong thu muc `adaptive_honeypot_system/`:
+Đã chạy trong thư mục `adaptive_honeypot_system/`:
 
 ```bash
 docker compose ps -a
@@ -54,30 +54,30 @@ make test-honeypots
 make test-rl-split-ip
 ```
 
-Ket qua:
-- [x] Tat ca service Up.
+Kết quả:
+- [x] Tất cả service Up.
 - [x] Routing controller health PASS.
 - [x] Gateway `/api/health` PASS (`real-backend`).
 - [x] `make test-routes` PASS.
 - [x] `make test-honeypots` PASS.
 - [x] `make test-rl-split-ip` PASS (Client A -> `ssti-honeypot`, Client B -> `real-backend`).
 
-## 4) Rang buoc da xac minh
+## 4) Ràng buộc đã xác minh
 
-- [x] Khong cai `torch` trong Docker runtime services (`routing_controller`, `backend`, `honeypots`).
-- [x] `torch` chi dung local de train offline.
-- [x] Chua test lai full benchmark train that vi hien chua co dataset that.
+- [x] Không cài `torch` trong Docker runtime services (`routing_controller`, `backend`, `honeypots`).
+- [x] `torch` chỉ dùng local để train offline.
+- [x] Chưa test lại full benchmark train thật vì hiện chưa có dataset thật.
 
-## 5) Luu y van hanh
+## 5) Lưu ý vận hành
 
-- Lenh make/compose nen chay trong `adaptive_honeypot_system/`.
-- `make train-rl` can dataset local (`control_plane/rl_agent/data/fake_transitions.jsonl`).
-- Neu data rong, dung `make train-rl-fresh` de tu sinh data roi train.
+- Lệnh make/compose nên chạy trong `adaptive_honeypot_system/`.
+- `make train-rl` cần dataset local (`control_plane/rl_agent/data/fake_transitions.jsonl`).
+- Nếu data rỗng, dùng `make train-rl-fresh` để tự sinh data rồi train.
 
-## 6) Viec con lai
+## 6) Việc còn lại
 
-- [ ] Noi `llm_analyzer` vao loop adaptive end-to-end.
-- [ ] Thay dummy policy bang policy RL train/evaluate day du tren dataset that.
-- [ ] Hoan thien benchmark (route accuracy, false reroute, engagement).
-- [ ] Don warning Pydantic namespace (`model_path`) trong routing controller.
+- [ ] Nối `llm_analyzer` vào loop adaptive end-to-end.
+- [ ] Thay dummy policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
+- [ ] Hoàn thiện benchmark (route accuracy, false reroute, engagement).
+- [ ] Dọn warning Pydantic namespace (`model_path`) trong routing controller.
   
