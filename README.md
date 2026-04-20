@@ -1,183 +1,90 @@
 # Adaptive Honeypot System
 
-## 1) Overview
-This project is a local Docker-based lab for adaptive honeypot research.
+## 1) Tong quan
+Day la bo lab local de nghien cuu adaptive honeypot routing, gom day du data plane + control plane.
 
-High-level layers:
-- Data plane: request routing and traffic steering (gateway).
-- Real service: normal frontend/backend used as bait workloads.
-- Honeypot service layer: web honeypots that emulate vulnerable behavior.
-- Control plane: log analysis + RL decision + routing control APIs.
-- Observability: ELK stack for log collection, indexing, and visualization.
+Kien truc hien tai:
+- Data plane: HAProxy gateway voi 2 mode normal/honeypot.
+- Real service: Flask backend + React frontend.
+- Lop honeypot web: CMDI, SQLI, SSTI, SSRF.
+- Control plane: FastAPI routing controller + RL model loading/inference.
+- Observability: Filebeat -> Elasticsearch -> Kibana.
 
-## 2) Project Structure
+Nguyen tac quan trong: control plane chay bat dong bo voi luong request, khong chen duong dong bo vao request path.
+
+## 2) Trang thai hien tai
+- Da co route theo mode qua `TEST_HONEYPOT=true|false`.
+- Da co map endpoint -> honeypot trong honeypot mode.
+- Da co route rieng `/api/health` ve real backend o ca 2 mode.
+- Da co dynamic routing theo session va source IP qua HAProxy map.
+- Da co API routing controller (`/health`, `/model/reload`, `/decide`, add/remove route).
+- Da co bo RL offline + dummy model de test route co tinh lap lai.
+- Da co script test honeypot doc lap (`test_honeypots.py`) + Make target.
+- Da co test split-IP end-to-end (1 IP vao honeypot, 1 IP vao backend that).
+
+## 3) Chinh sach PyTorch (bat buoc)
+- PyTorch chi dung de train RL offline tren may local.
+- Khong cai PyTorch trong bat ky Docker image runtime nao.
+- Khong them `torch` vao requirements cua `routing_controller` hay service runtime.
+- File local-only cho train: `adaptive_honeypot_system/control_plane/rl_agent/requirements-local.txt`.
+
+## 4) Cau truc thu muc
 
 ```text
 adaptive_honeypot_system/
-|-- .env
-|-- .env.example
 |-- Makefile
 |-- docker-compose.yml
-|
 |-- gateway/
-|   |-- Dockerfile
-|   |-- entrypoint.sh
-|   |-- haproxy.cfg
-|   |-- haproxy.normal.cfg
-|   |-- haproxy.honeypot.cfg
-|   `-- routing_update.sh
-|
-|-- real_service/
-|   |-- backend/
-|   |   |-- Dockerfile
-|   |   |-- app.py
-|   |   |-- models.py
-|   |   |-- requirements.txt
-|   |   `-- routes/
-|   |       |-- __init__.py
-|   |       |-- auth.py
-|   |       |-- articles.py
-|   |       `-- tools.py
-|   `-- frontend/
-|       |-- Dockerfile
-|       |-- nginx.conf
-|       |-- index.html
-|       |-- package.json
-|       |-- vite.config.js
-|       `-- src/
-|           |-- main.jsx
-|           |-- App.jsx
-|           |-- index.css
-|           |-- api/client.js
-|           |-- components/Navbar.jsx
-|           `-- pages/
-|               |-- Home.jsx
-|               |-- Login.jsx
-|               |-- Articles.jsx
-|               |-- ArticleDetail.jsx
-|               `-- Tools.jsx
-|
 |-- honeypots/
-|   |-- base.py
-|   |-- fake_data.py
-|   |-- cmdi_pot/
-|   |   |-- Dockerfile
-|   |   |-- app.py
-|   |   `-- requirements.txt
-|   |-- sqli_pot/
-|   |   |-- Dockerfile
-|   |   |-- app.py
-|   |   `-- requirements.txt
-|   |-- ssti_pot/
-|   |   |-- Dockerfile
-|   |   |-- app.py
-|   |   `-- requirements.txt
-|   `-- ssrf_pot/
-|       |-- Dockerfile
-|       |-- app.py
-|       `-- requirements.txt
-|
-|-- control_plane/
-|   |-- llm_analyzer/
-|   |   |-- analyzer.py
-|   |   |-- state_builder.py
-|   |   `-- requirements.txt
-|   |-- rl_agent/
-|   |   |-- agent.py
-|   |   |-- train_offline.py
-|   |   `-- requirements.txt
-|   `-- routing_controller/
-|       |-- Dockerfile
-|       |-- main.py
-|       `-- requirements.txt
-|
-`-- observability/
-    |-- elasticsearch/elasticsearch.yml
-    |-- kibana/kibana.yml
-    `-- filebeat/filebeat.yml
+|-- real_service/
+|-- observability/
+`-- control_plane/
+    |-- llm_analyzer/
+    |-- rl_agent/
+    `-- routing_controller/
+
+test_honeypots.py  (o root repo)
 ```
 
-## 3) What Each Part Does
+## 5) Hanh vi routing
 
-### Root config files
-- `.env` / `.env.example`
-  - Runtime variables (gateway mode switch, ELK connection, secrets).
-- `docker-compose.yml`
-  - Defines all containers, networks, and volumes.
-- `Makefile`
-  - Convenience commands for build, run, logs, mode switching, and checks.
+### Chon mode
+- Gateway doc `TEST_HONEYPOT` trong `.env`:
+  - `false` -> `haproxy.normal.cfg`
+  - `true` -> `haproxy.honeypot.cfg`
 
-### gateway/
-- Purpose: unified ingress and HTTP routing.
-- `entrypoint.sh`
-  - Chooses normal vs honeypot HAProxy config based on `TEST_HONEYPOT`.
-- `haproxy.normal.cfg`
-  - Routes API traffic to real backend.
-- `haproxy.honeypot.cfg`
-  - Routes API traffic to honeypot backend pool.
-- `routing_update.sh`
-  - Helper script for route map updates used by controller workflows.
+### Normal mode
+- Mac dinh request vao real backend.
+- Session/IP map co the override backend.
 
-### real_service/backend/
-- Purpose: normal API service used as realistic target application.
-- `app.py`
-  - Flask app bootstrap, DB initialization, route registration.
-- `models.py`
-  - SQLAlchemy models for users/articles.
-- `routes/auth.py`
-  - Login/register flows.
-- `routes/articles.py`
-  - Article listing/detail/create APIs.
-- `routes/tools.py`
-  - Utility endpoints (markdown preview, ping, URL fetch).
+### Honeypot mode
+- Mac dinh request vao endpoint honeypot.
+- Mapping endpoint:
+  - `/api/tools/ping` -> CMDI
+  - `/api/tools/preview` -> SSTI
+  - `/api/tools/fetch` -> SSRF
+  - `/api/articles/search` -> SQLI
+- `/api/health` luon vao `health_api` (real backend).
 
-### real_service/frontend/
-- Purpose: user-facing UI for interacting with the service.
-- React + Vite source in `src/`.
-- API calls centralized in `src/api/client.js`.
-- Nginx serves built assets in container runtime.
+### Dynamic map update
+- Session map: `/etc/haproxy/maps/session_routes.map`
+- IP map: `/etc/haproxy/maps/ip_honeypot.map`
+- Script cap nhat: `gateway/routing_update.sh`
 
-### honeypots/
-- Purpose: specialized web honeypot services with different attack signatures.
-- `base.py`
-  - Shared middleware for structured request logging.
-- `fake_data.py`
-  - Shared fake dataset used by honeypot responses.
-- `cmdi_pot/app.py`
-  - Command injection themed behavior.
-- `sqli_pot/app.py`
-  - SQL injection themed behavior.
-- `ssti_pot/app.py`
-  - Server-side template injection themed behavior.
-- `ssrf_pot/app.py`
-  - SSRF themed behavior.
+## 6) API control plane
+- `GET /health`
+- `POST /model/reload`
+- `POST /decide`
+- `POST /route/session/{session_id}`
+- `DELETE /route/session/{session_id}`
+- `POST /route/ip/{source_ip}`
+- `DELETE /route/ip/{source_ip}`
 
-### control_plane/
-- Purpose: asynchronous analysis and decision layer.
-- `llm_analyzer/`
-  - Builds semantic features from aggregated logs.
-- `rl_agent/`
-  - Offline RL policy logic and training scripts.
-- `routing_controller/`
-  - API bridge that applies routing decisions to gateway route maps.
+URL dich vu: `http://localhost:8001`
 
-### observability/
-- Purpose: centralized logging and dashboarding.
-- `filebeat/`
-  - Collects container logs and ships to Elasticsearch.
-- `elasticsearch/`
-  - Stores and indexes logs.
-- `kibana/`
-  - Visualization and analysis dashboards.
+## 7) Chay nhanh
 
-## 4) Runtime Flow (Current)
-1. Client traffic enters gateway.
-2. Gateway routes requests to real backend or honeypot pool based on mode/config.
-3. Services emit logs.
-4. Filebeat forwards logs to Elasticsearch.
-5. Kibana is used for monitoring and analysis.
-
-## 5) Quick Start
+Luu y: toan bo lenh van hanh chay trong `adaptive_honeypot_system/`.
 
 ```bash
 cd adaptive_honeypot_system
@@ -185,9 +92,53 @@ cp .env.example .env
 make up
 ```
 
-Useful commands:
-- `make ps` -> list container status
-- `make logs-gateway` -> watch gateway logs
-- `make mode-normal` -> route API to real backend
-- `make mode-honeypot` -> route API to honeypots
-- `make down` -> stop all services
+## 8) Lenh kiem thu nhanh
+
+```bash
+cd adaptive_honeypot_system
+docker compose ps -a
+curl -s http://localhost:8001/health
+curl -s http://localhost:8080/api/health
+make test-routes
+make test-honeypots
+make test-rl-split-ip
+```
+
+## 9) Kiem tra rang buoc "khong torch trong container"
+
+```bash
+cd adaptive_honeypot_system
+docker compose exec routing_controller python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
+docker compose exec backend python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
+docker compose exec cmdi_pot python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
+```
+
+Ket qua mong doi: tat ca deu `False`.
+
+## 10) Ket qua xac nhan gan nhat
+Lan chay hop nhat gan nhat (2026-04-19):
+- Container status: PASS
+- Routing controller health: PASS
+- Gateway `/api/health`: PASS
+- `make test-routes`: PASS
+- `make test-honeypots`: PASS
+- `make test-rl-split-ip`: PASS
+  - Client A -> `ssti-honeypot`
+  - Client B -> `real-backend`
+
+## 11) Service URLs
+- Gateway: `http://localhost:8080`
+- Routing controller: `http://localhost:8001`
+- HAProxy stats: `http://localhost:8404/stats`
+- Kibana: `http://localhost:5601`
+- Elasticsearch: `http://localhost:9200`
+- Honeypot direct ports:
+  - CMDI: `http://localhost:5002`
+  - SQLI: `http://localhost:5003`
+  - SSTI: `http://localhost:5004`
+  - SSRF: `http://localhost:5005`
+
+## 12) Gioi han hien tai
+- `llm_analyzer` chua noi day du vao loop adaptive end-to-end.
+- Policy dung trong split-IP demo la dummy model de test tinh on dinh, chua phai policy production.
+- Routing controller hien van co warning Pydantic namespace (`model_path`) nhung khong anh huong chuc nang.

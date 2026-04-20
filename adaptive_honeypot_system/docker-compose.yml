@@ -113,6 +113,36 @@ services:
     restart: unless-stopped
 
   # ============================================================
+  # CONTROL PLANE - RL Routing Controller
+  # ============================================================
+
+  routing_controller:
+    build:
+      context: .
+      dockerfile: control_plane/routing_controller/Dockerfile
+    container_name: adaptive-routing-controller
+    ports:
+      - "8001:8001"
+    environment:
+      - RL_MODEL_PATH=/app/control_plane/rl_agent/artifacts/rl_agent_linear.json
+      - ROUTING_UPDATE_SCRIPT=/app/gateway/routing_update.sh
+      - ROUTING_COMMAND_TIMEOUT=5
+    volumes:
+      - ./control_plane/rl_agent/artifacts:/app/control_plane/rl_agent/artifacts
+      - haproxy_maps:/etc/haproxy/maps
+      - haproxy_sock:/var/run/haproxy
+    depends_on:
+      - gateway
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================
   # OBSERVABILITY - SIEM & Monitoring
   # ============================================================
 

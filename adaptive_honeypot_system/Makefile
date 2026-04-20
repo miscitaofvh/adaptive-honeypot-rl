@@ -1,10 +1,12 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot status ps shell
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model test-rl-split-ip
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
 PROJECT_NAME := adaptive-honeypot-rl
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 GATEWAY_URL := http://localhost:8080
+RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
+RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
 
 # Colors for output
 CYAN := \033[0;36m
@@ -52,6 +54,13 @@ help:
 	@echo "  $(CYAN)test-all$(RESET)           Run all tests"
 	@echo "  $(CYAN)test-routes$(RESET)        Test core API routes"
 	@echo "  $(CYAN)test-honeypots$(RESET)     Run standalone honeypot detection script"
+	@echo "  $(CYAN)test-rl-split-ip$(RESET)   Validate one-IP honeypot split routing via controller"
+	@echo ""
+	@echo "$(YELLOW)RL TRAINING:$(RESET)"
+	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate synthetic transitions for offline RL"
+	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent from synthetic dataset"
+	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model end-to-end"
+	@echo "  $(CYAN)make-dummy-model$(RESET)   Build deterministic dummy model (always SSTI for HTTP)"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -211,6 +220,26 @@ test-routes:
 test-honeypots:
 	@echo "$(CYAN)[Running standalone honeypot tests...]$(RESET)"
 	@python ../test_honeypots.py
+
+## RL offline training
+gen-fake-data:
+	@echo "$(CYAN)[Generating synthetic RL dataset...]$(RESET)"
+	@python control_plane/rl_agent/generate_fake_data.py --output $(RL_DATASET)
+
+train-rl:
+	@echo "$(CYAN)[Training offline RL agent...]$(RESET)"
+	@python control_plane/rl_agent/train_offline.py --dataset $(RL_DATASET) --output $(RL_MODEL)
+
+train-rl-fresh: gen-fake-data train-rl
+	@echo "$(GREEN)✓ RL dataset + training completed$(RESET)"
+
+make-dummy-model:
+	@echo "$(CYAN)[Creating dummy SSTI routing model...]$(RESET)"
+	@python control_plane/rl_agent/create_dummy_ssti_model.py --output $(RL_MODEL)
+
+test-rl-split-ip:
+	@echo "$(CYAN)[Running split IP routing test via routing controller...]$(RESET)"
+	@bash control_plane/routing_controller/test_two_ip_split_routing.sh
 
 ## Shell access
 shell-backend:

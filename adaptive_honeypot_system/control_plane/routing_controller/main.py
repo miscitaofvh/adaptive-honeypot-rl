@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+import sys
+import threading
+from ipaddress import ip_address
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
+
+# Allow importing RL modules from sibling folder.
+RL_DIR = Path(__file__).resolve().parents[1] / "rl_agent"
+if str(RL_DIR) not in sys.path:
+    sys.path.insert(0, str(RL_DIR))
+
+from agent import (  # noqa: E402
+    ACTION_KEEP_NORMAL,
+    STATE_DIM,
+    LinearQAgent,
+    action_backend,
+    action_name,
+)
+
+logger = logging.getLogger("routing_controller")
+logging.basicConfig(level=logging.INFO)
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_MODEL_PATH = BASE_DIR / "control_plane" / "rl_agent" / "artifacts" / "rl_agent_linear.json"
+DEFAULT_ROUTING_SCRIPT = BASE_DIR / "gateway" / "routing_update.sh"
+
+MODEL_PATH = Path(os.getenv("RL_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
+ROUTING_SCRIPT = Path(os.getenv("ROUTING_UPDATE_SCRIPT", str(DEFAULT_ROUTING_SCRIPT)))
+COMMAND_TIMEOUT_SECONDS = float(os.getenv("ROUTING_COMMAND_TIMEOUT", "5"))
+
+ALLOWED_BACKENDS = {
+    "normal_api",
+    "endpoint_honeypot",
+    "sqli_api",
+    "ssti_api",
+    "cmdi_api",
+    "ssrf_api",
+    "ssh_honeypot",
+    "ftp_honeypot",
+    "smtp_honeypot",
+}
+
+model_lock = threading.Lock()
+agent = LinearQAgent(seed=123)
+
+
+class DecisionRequest(BaseModel):
+    protocol: str = Field(default="http")
+    state: List[float] = Field(min_length=STATE_DIM, max_length=STATE_DIM)
+    session_id: Optional[str] = None
+    source_ip: Optional[str] = None
+    apply_route: bool = True
+
+    @field_validator("protocol")
+    @classmethod
+    def normalize_protocol(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"http", "ssh", "ftp", "smtp"}:
+            raise ValueError("protocol must be one of: http, ssh, ftp, smtp")
+        return value
+
+
+class DecisionResponse(BaseModel):
+    protocol: str
+    action_id: int
+    action_name: str
+    backend: str
+    route_applied: bool
+    route_command: Optional[str] = None
+    route_output: Optional[str] = None
+
+
+class ReloadModelResponse(BaseModel):
+    loaded: bool
+    model_path: str
+    message: str
+
+
+class RouteUpdateResponse(BaseModel):
+    status: str
+    message: str
+    command: str
+    output: str
+
+
+def ensure_valid_backend(backend: str) -> str:
+    backend = backend.strip()
+    if backend not in ALLOWED_BACKENDS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Unsupported backend",
+                "backend": backend,
+                "allowed_backends": sorted(ALLOWED_BACKENDS),
+            },
+        )
+    return backend
+
+
+def ensure_valid_ip(source_ip: str) -> str:
+    try:
+        return str(ip_address(source_ip.strip()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid source_ip: {source_ip}") from exc
+
+
+def run_command(args: List[str]) -> str:
+    completed = subprocess.run(
+        args,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=COMMAND_TIMEOUT_SECONDS,
+    )
+    output = (completed.stdout or "").strip()
+    if not output:
+        output = (completed.stderr or "").strip()
+    return output
+
+
+def apply_route_decision(req: DecisionRequest, action_idx: int, backend: str) -> tuple[bool, Optional[str], Optional[str]]:
+    if not req.apply_route:
+        return False, None, None
+
+    if not ROUTING_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
+
+    command: List[str]
+
+    if req.protocol == "http":
+        # Keep proposal-aligned behavior (session-level on HTTP) and allow IP-level fallback for split-client tests.
+        if req.session_id:
+            if action_idx == ACTION_KEEP_NORMAL:
+                command = [str(ROUTING_SCRIPT), "remove_session", req.session_id]
+            else:
+                command = [str(ROUTING_SCRIPT), "add_session", req.session_id, backend]
+        elif req.source_ip:
+            source_ip = ensure_valid_ip(req.source_ip)
+            if action_idx == ACTION_KEEP_NORMAL:
+                command = [str(ROUTING_SCRIPT), "remove_ip", source_ip]
+            else:
+                command = [str(ROUTING_SCRIPT), "add_ip", source_ip, backend]
+        else:
+            raise HTTPException(status_code=400, detail="session_id or source_ip is required for HTTP routing updates")
+    else:
+        if not req.source_ip:
+            raise HTTPException(status_code=400, detail="source_ip is required for non-HTTP routing updates")
+
+        source_ip = ensure_valid_ip(req.source_ip)
+
+        if action_idx == ACTION_KEEP_NORMAL:
+            command = [str(ROUTING_SCRIPT), "remove_ip", source_ip]
+        else:
+            command = [str(ROUTING_SCRIPT), "add_ip", source_ip, backend]
+
+    try:
+        output = run_command(command)
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Failed to apply routing command",
+                "command": " ".join(command),
+                "stderr": (exc.stderr or "").strip(),
+                "stdout": (exc.stdout or "").strip(),
+            },
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "message": "Routing command timed out",
+                "command": " ".join(command),
+                "timeout_seconds": COMMAND_TIMEOUT_SECONDS,
+                "stdout": (exc.stdout or "").strip() if exc.stdout else "",
+                "stderr": (exc.stderr or "").strip() if exc.stderr else "",
+            },
+        ) from exc
+
+    return True, " ".join(command), output
+
+
+def try_load_model(path: Path) -> tuple[bool, str]:
+    global agent
+
+    if not path.exists():
+        agent = LinearQAgent(seed=123)
+        return False, f"Model not found at {path}. Using untrained agent."
+
+    with model_lock:
+        agent = LinearQAgent.load(path)
+    return True, f"Model loaded from {path}"
+
+
+app = FastAPI(title="Adaptive Routing Controller", version="0.1.0")
+
+
+@app.on_event("startup")
+def startup() -> None:
+    loaded, message = try_load_model(MODEL_PATH)
+    logger.info("startup model_loaded=%s message=%s", loaded, message)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "model_path": str(MODEL_PATH),
+        "routing_script": str(ROUTING_SCRIPT),
+        "model_exists": MODEL_PATH.exists(),
+    }
+
+
+@app.post("/model/reload", response_model=ReloadModelResponse)
+def reload_model() -> ReloadModelResponse:
+    loaded, message = try_load_model(MODEL_PATH)
+    return ReloadModelResponse(loaded=loaded, model_path=str(MODEL_PATH), message=message)
+
+
+@app.post("/route/session/{session_id}", response_model=RouteUpdateResponse)
+def set_session_route(session_id: str, backend: str = Query(..., description="Target backend name")) -> RouteUpdateResponse:
+    if not ROUTING_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
+
+    chosen_backend = ensure_valid_backend(backend)
+    output = run_command([str(ROUTING_SCRIPT), "add_session", session_id, chosen_backend])
+    return RouteUpdateResponse(
+        status="ok",
+        message=f"Session route updated: {session_id} -> {chosen_backend}",
+        command=f"{ROUTING_SCRIPT} add_session {session_id} {chosen_backend}",
+        output=output,
+    )
+
+
+@app.post("/route/ip/{source_ip}", response_model=RouteUpdateResponse)
+def set_ip_route(source_ip: str, backend: str = Query(..., description="Target backend name")) -> RouteUpdateResponse:
+    if not ROUTING_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
+
+    safe_ip = ensure_valid_ip(source_ip)
+    chosen_backend = ensure_valid_backend(backend)
+    output = run_command([str(ROUTING_SCRIPT), "add_ip", safe_ip, chosen_backend])
+    return RouteUpdateResponse(
+        status="ok",
+        message=f"IP route updated: {safe_ip} -> {chosen_backend}",
+        command=f"{ROUTING_SCRIPT} add_ip {safe_ip} {chosen_backend}",
+        output=output,
+    )
+
+
+@app.post("/decide", response_model=DecisionResponse)
+def decide(req: DecisionRequest) -> DecisionResponse:
+    with model_lock:
+        action_idx, _ = agent.select_action(req.state, req.protocol)
+
+    chosen_backend = action_backend(action_idx)
+    applied, route_command, route_output = apply_route_decision(req, action_idx, chosen_backend)
+
+    return DecisionResponse(
+        protocol=req.protocol,
+        action_id=action_idx,
+        action_name=action_name(action_idx),
+        backend=chosen_backend,
+        route_applied=applied,
+        route_command=route_command,
+        route_output=route_output,
+    )
+
+
+@app.delete("/route/session/{session_id}")
+def clear_session_route(session_id: str) -> dict:
+    if not ROUTING_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
+
+    output = run_command([str(ROUTING_SCRIPT), "remove_session", session_id])
+    return {
+        "status": "ok",
+        "message": f"Session route removed: {session_id}",
+        "output": output,
+    }
+
+
+@app.delete("/route/ip/{source_ip}")
+def clear_ip_route(source_ip: str) -> dict:
+    if not ROUTING_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
+
+    safe_ip = ensure_valid_ip(source_ip)
+    output = run_command([str(ROUTING_SCRIPT), "remove_ip", safe_ip])
+    return {
+        "status": "ok",
+        "message": f"IP route removed: {safe_ip}",
+        "output": output,
+    }
