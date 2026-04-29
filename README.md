@@ -98,7 +98,7 @@ make up
 cd adaptive_honeypot_system
 docker compose ps -a
 curl -s http://localhost:8001/health
-curl -s http://localhost:8080/api/health
+curl -s http://localhost:18080/api/health
 make test-routes
 make test-honeypots
 make test-rl-split-ip
@@ -127,7 +127,7 @@ Lần chạy hợp nhất gần nhất (2026-04-19):
   - Client B -> `real-backend`
 
 ## 11) Service URLs
-- Gateway: `http://localhost:8080`
+- Gateway: `http://localhost:18080`
 - Routing controller: `http://localhost:8001`
 - HAProxy stats: `http://localhost:8404/stats`
 - Kibana: `http://localhost:5601`

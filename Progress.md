@@ -48,7 +48,7 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 ```bash
 docker compose ps -a
 curl -s http://localhost:8001/health
-curl -s http://localhost:8080/api/health
+curl -s http://localhost:18080/api/health
 make test-routes
 make test-honeypots
 make test-rl-split-ip

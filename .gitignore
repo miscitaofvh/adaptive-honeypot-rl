@@ -1,6 +1,6 @@
 .env
 node_modules/
-proposal.md
+.idea/
 .venv
 .vscode/
 __pycache__/

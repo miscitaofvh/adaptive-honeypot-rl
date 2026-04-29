@@ -9,7 +9,7 @@ services:
       dockerfile: Dockerfile
     container_name: adaptive-gateway
     ports:
-      - "8080:80"
+      - "18080:80"
       - "8404:8404"
     volumes:
       - haproxy_maps:/etc/haproxy/maps

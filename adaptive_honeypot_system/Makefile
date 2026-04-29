@@ -4,7 +4,7 @@
 COMPOSE_FILE := docker-compose.yml
 PROJECT_NAME := adaptive-honeypot-rl
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
-GATEWAY_URL := http://localhost:8080
+GATEWAY_URL := http://localhost:18080
 RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
 
@@ -308,9 +308,9 @@ info:
 	@echo "$(CYAN)╚════════════════════════════════════════════════════════════╝$(RESET)"
 	@echo ""
 	@echo "$(YELLOW)Services:$(RESET)"
-	@echo "  • Gateway (HAProxy).......... http://localhost:8080"
-	@echo "  • Frontend (via Gateway).... http://localhost:8080"
-	@echo "  • Backend API (via Gateway). http://localhost:8080/api/*"
+	@echo "  • Gateway (HAProxy).......... http://localhost:18080"
+	@echo "  • Frontend (via Gateway).... http://localhost:18080"
+	@echo "  • Backend API (via Gateway). http://localhost:18080/api/*"
 	@echo "  • CMDi Honeypot............. http://localhost:5002"
 	@echo "  • SQLi Honeypot............. http://localhost:5003"
 	@echo "  • SSTI Honeypot............. http://localhost:5004"
