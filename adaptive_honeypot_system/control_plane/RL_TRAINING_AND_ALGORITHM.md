@@ -21,6 +21,7 @@ Phạm vi control plane hiện tại (chưa tính LLM analyzer):
 - `control_plane/rl_agent/train_offline.py`
 - `control_plane/rl_agent/agent.py`
 - `control_plane/routing_controller/main.py`
+- `control_plane/llm_analyzer/analyzer.py` (dummy analyzer cho Web MVP, chưa phải LLM thật)
 
 `routing_controller` đã được wiring trong `docker-compose.yml`.
 
@@ -29,6 +30,7 @@ Phạm vi control plane hiện tại (chưa tính LLM analyzer):
 - PyTorch chỉ dùng để train offline trên máy local.
 - Tuyệt đối không cài `torch` trong Docker runtime của hệ thống.
 - Runtime controller chỉ đọc JSON weights (`LinearQAgent`) và không phụ thuộc torch.
+- Web MVP có thể chạy `RL_POLICY_MODE=heuristic` để dùng dummy subtype-based policy mà không cần model artifact.
 - Yêu cầu local để train: `control_plane/rl_agent/requirements-local.txt`.
 
 ## 3) Thiết kế state và action
@@ -139,9 +141,17 @@ Tạo dummy model để test split-route (HTTP luôn vào SSTI):
 make make-dummy-model
 ```
 
+Tạo dummy web policy model theo subtype `[sqli, cmdi, ssti, ssrf]`:
+
+```bash
+make make-dummy-web-model
+```
+
 Artifact mong đợi:
 - `control_plane/rl_agent/artifacts/rl_agent_linear.json`
 - `control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json`
+
+Lưu ý: Docker Compose mặc định dùng `RL_POLICY_MODE=heuristic` để flow demo Web chạy ổn định ngay cả khi chưa có model thật. Khi muốn test artifact JSON, đặt `RL_POLICY_MODE=model`.
 
 ## 8) Validate nhanh sau train
 
@@ -250,9 +260,22 @@ Script sẽ:
 - Chỉ apply route cho client A qua `POST /decide` với `source_ip`.
 - Kiểm tra kết quả split: A => `ssti-honeypot`, B => `real-backend`.
 
+### End-to-end adaptive web test
+
+```bash
+make test-adaptive-web
+```
+
+Script sẽ:
+- Ép gateway về normal-first mode.
+- Chạy dummy analyzer và routing controller ở `RL_POLICY_MODE=heuristic`.
+- Gửi SQLi-like payload vào real backend search endpoint.
+- Đợi analyzer poll Elasticsearch, dựng state 24D và gọi `/decide`.
+- Xác nhận request tiếp theo cùng `sid` được route sang SQLi honeypot.
+
 ## 10) Giới hạn hiện tại
 
-- `llm_analyzer` chưa nối end-to-end, semantic features vẫn là synthetic.
+- `llm_analyzer` hiện là dummy/rule-based analyzer; LLM thật và memory/stateful analysis vẫn chưa implement.
 - Mô hình hiện tại là linear Q approximation, chưa phải DQN/BCQ đầy đủ.
 - Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
 - Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.

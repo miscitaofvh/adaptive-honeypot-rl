@@ -43,6 +43,7 @@ reload_model_with_retry() {
 }
 
 cleanup() {
+  curl -fsS -X DELETE "$CONTROLLER_URL/routes" >/dev/null 2>&1 || true
   if [[ -n "$IP_A" ]]; then
     curl -fsS -X DELETE "$CONTROLLER_URL/route/ip/$IP_A" >/dev/null 2>&1 || true
   fi
@@ -57,11 +58,12 @@ echo "[1/6] Create dummy model (always SSTI for HTTP)..."
 python control_plane/rl_agent/create_dummy_ssti_model.py --output "$MODEL_PATH"
 
 echo "[2/6] Start gateway + routing_controller in NORMAL mode (control plane async, service-first)..."
-TEST_HONEYPOT=false docker compose up -d --build gateway routing_controller >/dev/null
+TEST_HONEYPOT=false RL_POLICY_MODE=model docker compose up -d --build gateway routing_controller >/dev/null
 wait_for_controller
 
 echo "[3/6] Reload model in routing controller..."
 reload_model_with_retry
+curl -fsS -X DELETE "$CONTROLLER_URL/routes" >/dev/null 2>&1 || true
 
 NETWORK_NAME="$(docker inspect adaptive-gateway --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1 | tr -d '[:space:]')"
 if [[ -z "$NETWORK_NAME" ]]; then

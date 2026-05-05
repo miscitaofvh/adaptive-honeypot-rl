@@ -1,12 +1,13 @@
 import os
+import fcntl
 from flask import Flask
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
-from sqlalchemy import inspect
 from models import db, User, Article
 from routes.auth import auth_bp
 from routes.articles import articles_bp
 from routes.tools import tools_bp
+from logging_utils import install_request_logging
 
 def create_app():
     app = Flask(__name__)
@@ -15,8 +16,10 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL','sqlite:////data/meridian.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JSON_SORT_KEYS'] = False
+    app.config['SERVICE_NAME'] = os.environ.get('SERVICE_NAME','real-backend')
     
     CORS(app, resources={r"/api/*":{"origins":"*"}})
+    install_request_logging(app)
     db.init_app(app)
     JWTManager(app)
     
@@ -26,15 +29,27 @@ def create_app():
 
     @app.get('/api/health')
     def health():
-        return {'status':'ok','service':os.environ.get('SERVICE_NAME','real-backend')}
+        return {'status':'ok','service':app.config['SERVICE_NAME']}
+
+    _initialize_database(app)
+    return app
+
+
+def _initialize_database(app):
+    lock_path = os.environ.get('DB_INIT_LOCK_PATH', '/data/.meridian-init.lock')
+    lock_dir = os.path.dirname(lock_path)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
 
     with app.app_context():
-        inspector = inspect(db.engine)
-        existing_tables = inspector.get_table_names()
-        if 'users' not in existing_tables:
-            db.create_all()
-        _seed()
-    return app
+        with open(lock_path, 'w', encoding='utf-8') as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                db.create_all()
+                _seed()
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+
 
 def _seed():
     if User.query.first(): return

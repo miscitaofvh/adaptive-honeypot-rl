@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+from sqlalchemy import or_
 from models import Article, db
 
 articles_bp = Blueprint('articles', __name__)
@@ -19,6 +20,40 @@ def list_articles():
         page=page,
         pages=items.pages,
         items=[a.to_dict() for a in items.items]
+    )
+
+@articles_bp.post('/search')
+def search_articles():
+    data = request.get_json(silent=True) or {}
+    query_text = (data.get('query') or '').strip()
+    try:
+        page = max(1, int(data.get('page') or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        limit = min(max(1, int(data.get('limit') or 10)), 50)
+    except (TypeError, ValueError):
+        limit = 10
+
+    query = Article.query.order_by(Article.created_at.desc())
+    if query_text:
+        pattern = f'%{query_text}%'
+        query = query.filter(
+            or_(
+                Article.title.ilike(pattern),
+                Article.summary.ilike(pattern),
+                Article.content.ilike(pattern),
+                Article.category.ilike(pattern),
+                Article.tags.ilike(pattern),
+            )
+        )
+
+    items = query.paginate(page=page, per_page=limit, error_out=False)
+    return jsonify(
+        total=items.total,
+        page=page,
+        pages=items.pages,
+        items=[a.to_dict() for a in items.items],
     )
 
 @articles_bp.get('/<int:article_id>')

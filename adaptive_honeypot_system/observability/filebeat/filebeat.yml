@@ -22,18 +22,12 @@ filebeat.inputs:
           match_source: true
           match_source_index: 4
           match_fields: ["container.id"]
-      # Keep only data-plane logs.
+      # Keep application/control-plane logs; drop observability noise and static frontend logs.
       - drop_event:
           when:
             or:
               - regexp:
                   container.name: "^/?adaptive-(elasticsearch|kibana|filebeat|frontend)$"
-              - regexp:
-                  container.id: "^${HOSTNAME}"
-              - regexp:
-                  container.id: "^(3db3282f7882|2f5cbc6a7e8f|393230ce5c76)"
-              - regexp:
-                  log.file.path: "/var/lib/docker/containers/(3db3282f7882|2f5cbc6a7e8f|393230ce5c76)"
       # Keep raw application line in a standard searchable field.
       - copy_fields:
           fields:
@@ -61,9 +55,9 @@ output.elasticsearch:
   index: "honeypot-logs-%{+yyyy.MM.dd}"
 
 setup.ilm.enabled: false
-setup.template.enabled: true
-setup.template.name: "honeypot-logs"
-setup.template.pattern: "honeypot-logs-*"
+# Keep this MVP on a custom daily target. Disabling auto template loading avoids
+# Filebeat 8 setup/data-stream races while Elasticsearch is still starting.
+setup.template.enabled: false
 
 logging.level: info
 logging.to_files: true

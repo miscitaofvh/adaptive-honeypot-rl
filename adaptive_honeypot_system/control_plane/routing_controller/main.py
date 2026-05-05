@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import sys
 import threading
+from datetime import datetime, timezone
 from ipaddress import ip_address
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Allow importing RL modules from sibling folder.
 RL_DIR = Path(__file__).resolve().parents[1] / "rl_agent"
@@ -19,6 +21,10 @@ if str(RL_DIR) not in sys.path:
 
 from agent import (  # noqa: E402
     ACTION_KEEP_NORMAL,
+    ACTION_ROUTE_CMDI,
+    ACTION_ROUTE_SQLI,
+    ACTION_ROUTE_SSRF,
+    ACTION_ROUTE_SSTI,
     STATE_DIM,
     LinearQAgent,
     action_backend,
@@ -35,14 +41,21 @@ DEFAULT_ROUTING_SCRIPT = BASE_DIR / "gateway" / "routing_update.sh"
 MODEL_PATH = Path(os.getenv("RL_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
 ROUTING_SCRIPT = Path(os.getenv("ROUTING_UPDATE_SCRIPT", str(DEFAULT_ROUTING_SCRIPT)))
 COMMAND_TIMEOUT_SECONDS = float(os.getenv("ROUTING_COMMAND_TIMEOUT", "5"))
+POLICY_MODE = os.getenv("RL_POLICY_MODE", "model").strip().lower()
+HEURISTIC_ROUTE_THRESHOLD = float(os.getenv("HEURISTIC_ROUTE_THRESHOLD", "0.45"))
+L4_ROUTING_ENABLED = os.getenv("L4_ROUTING_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+SESSION_ROUTES_MAP = Path(os.getenv("SESSION_ROUTES_MAP", "/etc/haproxy/maps/session_routes.map"))
+IP_HONEYPOT_MAP = Path(os.getenv("IP_HONEYPOT_MAP", "/etc/haproxy/maps/ip_honeypot.map"))
 
-ALLOWED_BACKENDS = {
+HTTP_BACKENDS = {
     "normal_api",
-    "endpoint_honeypot",
     "sqli_api",
     "ssti_api",
     "cmdi_api",
     "ssrf_api",
+}
+
+L4_PLACEHOLDER_BACKENDS = {
     "ssh_honeypot",
     "ftp_honeypot",
     "smtp_honeypot",
@@ -79,6 +92,8 @@ class DecisionResponse(BaseModel):
 
 
 class ReloadModelResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     loaded: bool
     model_path: str
     message: str
@@ -91,15 +106,41 @@ class RouteUpdateResponse(BaseModel):
     output: str
 
 
-def ensure_valid_backend(backend: str) -> str:
+class ClearRoutesResponse(BaseModel):
+    status: str
+    message: str
+    command: str
+    output: str
+
+
+def ensure_valid_backend(backend: str, protocol: str = "http") -> str:
     backend = backend.strip()
-    if backend not in ALLOWED_BACKENDS:
+    if backend in L4_PLACEHOLDER_BACKENDS and not L4_ROUTING_ENABLED:
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "message": "L4 routing is intentionally disabled in the current Web MVP",
+                "backend": backend,
+                "protocol": protocol,
+            },
+        )
+
+    if protocol != "http" and not L4_ROUTING_ENABLED:
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "message": "Non-HTTP Drop-and-Catch routing is not implemented in this milestone",
+                "protocol": protocol,
+            },
+        )
+
+    if backend not in HTTP_BACKENDS:
         raise HTTPException(
             status_code=400,
             detail={
                 "message": "Unsupported backend",
                 "backend": backend,
-                "allowed_backends": sorted(ALLOWED_BACKENDS),
+                "allowed_backends": sorted(HTTP_BACKENDS),
             },
         )
     return backend
@@ -126,6 +167,43 @@ def run_command(args: List[str]) -> str:
     return output
 
 
+def select_policy_action(req: DecisionRequest) -> int:
+    if POLICY_MODE in {"heuristic", "dummy", "rule", "rules"}:
+        return heuristic_action(req.state, req.protocol)
+
+    with model_lock:
+        action_idx, _ = agent.select_action(req.state, req.protocol)
+    return action_idx
+
+
+def heuristic_action(state: List[float], protocol: str) -> int:
+    """Deterministic dummy RL policy for the Web MVP.
+
+    It consumes the same 24D state vector as the trained agent. The policy is
+    deliberately conservative: keep benign traffic normal, but route strong
+    web subtype evidence to the matching honeypot to maximize attacker
+    engagement without protecting/blocking the service path.
+    """
+    if protocol != "http":
+        return ACTION_KEEP_NORMAL
+
+    subtype_candidates = [
+        (float(state[13]), ACTION_ROUTE_SQLI),
+        (float(state[14]), ACTION_ROUTE_CMDI),
+        (float(state[15]), ACTION_ROUTE_SSTI),
+        (float(state[16]), ACTION_ROUTE_SSRF),
+    ]
+    best_score, best_action = max(subtype_candidates, key=lambda item: item[0])
+    injection_score = float(state[9])
+    evasion_score = float(state[17])
+
+    if best_score >= HEURISTIC_ROUTE_THRESHOLD:
+        return best_action
+    if injection_score >= 0.65 and evasion_score >= 0.40:
+        return best_action
+    return ACTION_KEEP_NORMAL
+
+
 def apply_route_decision(req: DecisionRequest, action_idx: int, backend: str) -> tuple[bool, Optional[str], Optional[str]]:
     if not req.apply_route:
         return False, None, None
@@ -136,30 +214,44 @@ def apply_route_decision(req: DecisionRequest, action_idx: int, backend: str) ->
     command: List[str]
 
     if req.protocol == "http":
+        chosen_backend = ensure_valid_backend(backend, req.protocol)
         # Keep proposal-aligned behavior (session-level on HTTP) and allow IP-level fallback for split-client tests.
         if req.session_id:
             if action_idx == ACTION_KEEP_NORMAL:
                 command = [str(ROUTING_SCRIPT), "remove_session", req.session_id]
             else:
-                command = [str(ROUTING_SCRIPT), "add_session", req.session_id, backend]
+                command = [str(ROUTING_SCRIPT), "add_session", req.session_id, chosen_backend]
         elif req.source_ip:
             source_ip = ensure_valid_ip(req.source_ip)
             if action_idx == ACTION_KEEP_NORMAL:
                 command = [str(ROUTING_SCRIPT), "remove_ip", source_ip]
             else:
-                command = [str(ROUTING_SCRIPT), "add_ip", source_ip, backend]
+                command = [str(ROUTING_SCRIPT), "add_ip", source_ip, chosen_backend]
         else:
             raise HTTPException(status_code=400, detail="session_id or source_ip is required for HTTP routing updates")
     else:
+        if not L4_ROUTING_ENABLED:
+            if action_idx == ACTION_KEEP_NORMAL:
+                return False, None, "L4 routing disabled; KEEP_NORMAL does not require a route update"
+            raise HTTPException(
+                status_code=501,
+                detail={
+                    "message": "L4 Drop-and-Catch routing is not implemented in this milestone",
+                    "protocol": req.protocol,
+                    "backend": backend,
+                },
+            )
+
         if not req.source_ip:
             raise HTTPException(status_code=400, detail="source_ip is required for non-HTTP routing updates")
 
         source_ip = ensure_valid_ip(req.source_ip)
+        chosen_backend = ensure_valid_backend(backend, req.protocol)
 
         if action_idx == ACTION_KEEP_NORMAL:
             command = [str(ROUTING_SCRIPT), "remove_ip", source_ip]
         else:
-            command = [str(ROUTING_SCRIPT), "add_ip", source_ip, backend]
+            command = [str(ROUTING_SCRIPT), "add_ip", source_ip, chosen_backend]
 
     try:
         output = run_command(command)
@@ -186,6 +278,41 @@ def apply_route_decision(req: DecisionRequest, action_idx: int, backend: str) ->
         ) from exc
 
     return True, " ".join(command), output
+
+
+def log_decision(req: DecisionRequest, action_idx: int, backend: str, applied: bool, route_output: Optional[str]) -> None:
+    payload = {
+        "event_schema_version": "1.0",
+        "event_type": "route_decision",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "service": "routing-controller",
+        "policy_mode": POLICY_MODE,
+        "protocol": req.protocol,
+        "session_id": req.session_id or "",
+        "source_ip": req.source_ip or "",
+        "action_id": action_idx,
+        "action_name": action_name(action_idx),
+        "backend": backend,
+        "route_applied": applied,
+        "route_output": route_output or "",
+    }
+    logger.info(json.dumps(payload, ensure_ascii=True))
+
+
+def read_map(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    result: dict[str, str] = {}
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                result[parts[0]] = parts[1]
+    return result
 
 
 def try_load_model(path: Path) -> tuple[bool, str]:
@@ -216,6 +343,10 @@ def health() -> dict:
         "model_path": str(MODEL_PATH),
         "routing_script": str(ROUTING_SCRIPT),
         "model_exists": MODEL_PATH.exists(),
+        "policy_mode": POLICY_MODE,
+        "heuristic_route_threshold": HEURISTIC_ROUTE_THRESHOLD,
+        "l4_routing_enabled": L4_ROUTING_ENABLED,
+        "implemented_backends": sorted(HTTP_BACKENDS),
     }
 
 
@@ -230,7 +361,7 @@ def set_session_route(session_id: str, backend: str = Query(..., description="Ta
     if not ROUTING_SCRIPT.exists():
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
-    chosen_backend = ensure_valid_backend(backend)
+    chosen_backend = ensure_valid_backend(backend, "http")
     output = run_command([str(ROUTING_SCRIPT), "add_session", session_id, chosen_backend])
     return RouteUpdateResponse(
         status="ok",
@@ -246,7 +377,7 @@ def set_ip_route(source_ip: str, backend: str = Query(..., description="Target b
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
     safe_ip = ensure_valid_ip(source_ip)
-    chosen_backend = ensure_valid_backend(backend)
+    chosen_backend = ensure_valid_backend(backend, "http")
     output = run_command([str(ROUTING_SCRIPT), "add_ip", safe_ip, chosen_backend])
     return RouteUpdateResponse(
         status="ok",
@@ -258,11 +389,10 @@ def set_ip_route(source_ip: str, backend: str = Query(..., description="Target b
 
 @app.post("/decide", response_model=DecisionResponse)
 def decide(req: DecisionRequest) -> DecisionResponse:
-    with model_lock:
-        action_idx, _ = agent.select_action(req.state, req.protocol)
-
+    action_idx = select_policy_action(req)
     chosen_backend = action_backend(action_idx)
     applied, route_command, route_output = apply_route_decision(req, action_idx, chosen_backend)
+    log_decision(req, action_idx, chosen_backend, applied, route_output)
 
     return DecisionResponse(
         protocol=req.protocol,
@@ -299,4 +429,51 @@ def clear_ip_route(source_ip: str) -> dict:
         "status": "ok",
         "message": f"IP route removed: {safe_ip}",
         "output": output,
+    }
+
+
+@app.delete("/routes", response_model=ClearRoutesResponse)
+def clear_routes() -> ClearRoutesResponse:
+    if not ROUTING_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
+
+    command = [str(ROUTING_SCRIPT), "clear_all"]
+    output = run_command(command)
+    return ClearRoutesResponse(
+        status="ok",
+        message="All adaptive route maps cleared",
+        command=" ".join(command),
+        output=output,
+    )
+
+
+@app.get("/routes")
+def list_routes() -> dict:
+    return {
+        "status": "ok",
+        "session_routes": read_map(SESSION_ROUTES_MAP),
+        "ip_routes": read_map(IP_HONEYPOT_MAP),
+    }
+
+
+@app.get("/route/session/{session_id}")
+def get_session_route(session_id: str) -> dict:
+    routes = read_map(SESSION_ROUTES_MAP)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "backend": routes.get(session_id),
+        "found": session_id in routes,
+    }
+
+
+@app.get("/route/ip/{source_ip}")
+def get_ip_route(source_ip: str) -> dict:
+    safe_ip = ensure_valid_ip(source_ip)
+    routes = read_map(IP_HONEYPOT_MAP)
+    return {
+        "status": "ok",
+        "source_ip": safe_ip,
+        "backend": routes.get(safe_ip),
+        "found": safe_ip in routes,
     }

@@ -125,6 +125,9 @@ services:
       - "8001:8001"
     environment:
       - RL_MODEL_PATH=/app/control_plane/rl_agent/artifacts/rl_agent_linear.json
+      - RL_POLICY_MODE=${RL_POLICY_MODE:-heuristic}
+      - HEURISTIC_ROUTE_THRESHOLD=${HEURISTIC_ROUTE_THRESHOLD:-0.45}
+      - L4_ROUTING_ENABLED=false
       - ROUTING_UPDATE_SCRIPT=/app/gateway/routing_update.sh
       - ROUTING_COMMAND_TIMEOUT=5
     volumes:
@@ -138,6 +141,33 @@ services:
     restart: unless-stopped
     healthcheck:
       test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  llm_analyzer:
+    build:
+      context: .
+      dockerfile: control_plane/llm_analyzer/Dockerfile
+    container_name: adaptive-llm-analyzer
+    ports:
+      - "8002:8002"
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=honeypot-logs-*
+      - ROUTING_CONTROLLER_URL=http://routing_controller:8001
+      - ANALYZER_INTERVAL_SECONDS=${ANALYZER_INTERVAL_SECONDS:-2}
+      - ANALYZER_WINDOW_SECONDS=${ANALYZER_WINDOW_SECONDS:-300}
+      - ANALYZER_APPLY_ROUTE=${ANALYZER_APPLY_ROUTE:-true}
+      - ANALYZER_ENABLED=${ANALYZER_ENABLED:-true}
+    depends_on:
+      - elasticsearch
+      - routing_controller
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)"
       interval: 20s
       timeout: 5s
       retries: 3

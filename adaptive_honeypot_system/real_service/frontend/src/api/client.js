@@ -30,6 +30,15 @@ export const api = {
       if (Array.isArray(data.articles)) return { ...data, items: data.articles }
       return { ...data, items: [] }
     }),
+  searchArticles: (query, page = 1, limit = 10) =>
+    request('/api/articles/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, page, limit }),
+    }).then(data => {
+      if (Array.isArray(data.items)) return data
+      if (Array.isArray(data.articles)) return { ...data, items: data.articles }
+      return { ...data, items: [] }
+    }),
   getArticle: (id) => request(`/api/articles/${id}`),
   preview: (content) =>
     request('/api/tools/preview', { method: 'POST', body: JSON.stringify({ content }) }),

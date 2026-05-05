@@ -69,12 +69,28 @@ runtime_del() {
 }
 
 usage() {
-    echo "Usage: $0 {add_session|add_ip|remove_session|remove_ip|drop_connection} <identifier> [backend_name]"
+    echo "Usage: $0 {add_session|add_ip|remove_session|remove_ip|clear_sessions|clear_ips|clear_all|drop_connection} <identifier> [backend_name]"
     echo "Example backend_name: normal_api|sqli_api|ssti_api|cmdi_api|ssrf_api"
 }
 
 ensure_map "$SESSION_ROUTES_MAP"
 ensure_map "$IP_HONEYPOT_MAP"
+
+clear_map() {
+    map_file="$1"
+
+    if [ -s "$map_file" ]; then
+        while read -r key _; do
+            [ -n "${key:-}" ] || continue
+            case "$key" in
+                \#*) continue ;;
+            esac
+            runtime_del "$map_file" "$key"
+        done < "$map_file"
+    fi
+
+    : > "$map_file"
+}
 
 case "${1:-}" in
     add_session)
@@ -101,9 +117,23 @@ case "${1:-}" in
         runtime_del "$IP_HONEYPOT_MAP" "$2"
         echo "IP routing removed: $2"
         ;;
+    clear_sessions)
+        clear_map "$SESSION_ROUTES_MAP"
+        echo "Session routes cleared"
+        ;;
+    clear_ips)
+        clear_map "$IP_HONEYPOT_MAP"
+        echo "IP routes cleared"
+        ;;
+    clear_all)
+        clear_map "$SESSION_ROUTES_MAP"
+        clear_map "$IP_HONEYPOT_MAP"
+        echo "All adaptive routes cleared"
+        ;;
     drop_connection)
         [ "${2:-}" ] || { usage; exit 1; }
-        echo "drop_connection requested for $2 - L4 drop flow is not implemented in current gateway"
+        echo "drop_connection requested for $2 - L4 drop flow is not implemented in current gateway" >&2
+        exit 2
         ;;
     *)
         usage

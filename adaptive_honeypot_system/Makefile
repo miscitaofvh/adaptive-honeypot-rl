@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model test-rl-split-ip
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model clear-routes test-rl-split-ip test-adaptive-web validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -55,12 +55,15 @@ help:
 	@echo "  $(CYAN)test-routes$(RESET)        Test core API routes"
 	@echo "  $(CYAN)test-honeypots$(RESET)     Run standalone honeypot detection script"
 	@echo "  $(CYAN)test-rl-split-ip$(RESET)   Validate one-IP honeypot split routing via controller"
+	@echo "  $(CYAN)test-adaptive-web$(RESET)  Validate log -> analyzer -> route -> honeypot flow"
+	@echo "  $(CYAN)validate$(RESET)           Run syntax + core smoke checks"
 	@echo ""
 	@echo "$(YELLOW)RL TRAINING:$(RESET)"
 	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate synthetic transitions for offline RL"
 	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent from synthetic dataset"
 	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model end-to-end"
 	@echo "  $(CYAN)make-dummy-model$(RESET)   Build deterministic dummy model (always SSTI for HTTP)"
+	@echo "  $(CYAN)make-dummy-web-model$(RESET) Build deterministic subtype-based web dummy model"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -70,6 +73,7 @@ help:
 	@echo "$(YELLOW)MAINTENANCE:$(RESET)"
 	@echo "  $(CYAN)clean$(RESET)              Remove containers, volumes, and images"
 	@echo "  $(CYAN)clean-logs$(RESET)         Clear all container logs"
+	@echo "  $(CYAN)clear-routes$(RESET)       Clear HAProxy adaptive route maps"
 	@echo "  $(CYAN)status$(RESET)             Show detailed system status"
 	@echo "  $(CYAN)health$(RESET)             Check health of all services"
 	@echo ""
@@ -146,6 +150,9 @@ logs-ssrf:
 logs-siem:
 	@$(DOCKER_COMPOSE) logs -f elasticsearch kibana filebeat
 
+logs-analyzer:
+	@$(DOCKER_COMPOSE) logs -f llm_analyzer routing_controller
+
 ## Mode switching
 mode-normal:
 	@echo "$(CYAN)[Switching to NORMAL mode (TEST_HONEYPOT=false)]$(RESET)"
@@ -201,14 +208,30 @@ test-all: test-api test-cmdi
 
 test-routes:
 	@echo "$(CYAN)[Testing Core API Routes...]$(RESET)"
+	@curl -fsS -X DELETE http://localhost:8001/routes >/dev/null 2>&1 || true
 	@echo ""
 	@echo "$(YELLOW)1. Health Check (/api/health):$(RESET)"
-	@curl -s $(GATEWAY_URL)/api/health | jq -r '.service' 2>/dev/null || curl -s $(GATEWAY_URL)/api/health
+	@HEALTH_BODY=$$(curl -fsS $(GATEWAY_URL)/api/health); \
+	echo "$$HEALTH_BODY"; \
+	HEALTH_SERVICE=$$(printf '%s' "$$HEALTH_BODY" | python -c 'import json, sys; print(json.load(sys.stdin).get("service", ""))'); \
+	echo "$$HEALTH_SERVICE"; \
+	if [ "$$HEALTH_SERVICE" != "real-backend" ]; then \
+		echo "$(RED)FAIL: expected real-backend after route cleanup, got $$HEALTH_SERVICE$(RESET)"; \
+		exit 1; \
+	fi
 	@echo ""
 	@echo "$(YELLOW)2. Article List (/api/articles):$(RESET)"
 	@curl -s "$(GATEWAY_URL)/api/articles?page=1&limit=2" | jq . 2>/dev/null || curl -s "$(GATEWAY_URL)/api/articles?page=1&limit=2"
 	@echo ""
-	@echo "$(YELLOW)3. Tools Preview (/api/tools/preview):$(RESET)"
+	@echo "$(YELLOW)3. Article Search (/api/articles/search):$(RESET)"
+	@curl -s -X POST "$(GATEWAY_URL)/api/articles/search" \
+		-H "Content-Type: application/json" \
+		-d '{"query":"tcp"}' | jq . 2>/dev/null || \
+	curl -s -X POST "$(GATEWAY_URL)/api/articles/search" \
+		-H "Content-Type: application/json" \
+		-d '{"query":"tcp"}'
+	@echo ""
+	@echo "$(YELLOW)4. Tools Preview (/api/tools/preview):$(RESET)"
 	@curl -s -X POST "$(GATEWAY_URL)/api/tools/preview" \
 		-H "Content-Type: application/json" \
 		-d '{"content":"hello world"}' | jq . 2>/dev/null || \
@@ -216,6 +239,10 @@ test-routes:
 		-H "Content-Type: application/json" \
 		-d '{"content":"hello world"}'
 	@echo ""
+
+clear-routes:
+	@echo "$(CYAN)[Clearing adaptive route maps...]$(RESET)"
+	@curl -fsS -X DELETE http://localhost:8001/routes
 
 test-honeypots:
 	@echo "$(CYAN)[Running standalone honeypot tests...]$(RESET)"
@@ -237,9 +264,47 @@ make-dummy-model:
 	@echo "$(CYAN)[Creating dummy SSTI routing model...]$(RESET)"
 	@python control_plane/rl_agent/create_dummy_ssti_model.py --output $(RL_MODEL)
 
+make-dummy-web-model:
+	@echo "$(CYAN)[Creating deterministic web subtype routing model...]$(RESET)"
+	@python control_plane/rl_agent/create_dummy_web_policy_model.py --output $(RL_MODEL)
+
 test-rl-split-ip:
 	@echo "$(CYAN)[Running split IP routing test via routing controller...]$(RESET)"
 	@bash control_plane/routing_controller/test_two_ip_split_routing.sh
+
+test-adaptive-web:
+	@echo "$(CYAN)[Running adaptive Web MVP flow test...]$(RESET)"
+	@bash control_plane/llm_analyzer/test_adaptive_web_flow.sh
+
+validate:
+	@echo "$(CYAN)[Python syntax check...]$(RESET)"
+	@python -m py_compile \
+		../test_honeypots.py \
+		real_service/backend/app.py \
+		real_service/backend/logging_utils.py \
+		real_service/backend/models.py \
+		real_service/backend/routes/auth.py \
+		real_service/backend/routes/articles.py \
+		real_service/backend/routes/tools.py \
+		honeypots/base.py \
+		honeypots/fake_data.py \
+		honeypots/cmdi_pot/app.py \
+		honeypots/sqli_pot/app.py \
+		honeypots/ssti_pot/app.py \
+		honeypots/ssrf_pot/app.py \
+		control_plane/rl_agent/agent.py \
+		control_plane/rl_agent/generate_fake_data.py \
+		control_plane/rl_agent/train_offline.py \
+		control_plane/rl_agent/create_dummy_ssti_model.py \
+		control_plane/rl_agent/create_dummy_web_policy_model.py \
+		control_plane/routing_controller/main.py \
+		control_plane/llm_analyzer/analyzer.py
+	@echo "$(GREEN)✓ Syntax check complete$(RESET)"
+	@echo "$(CYAN)[Checking routing controller health...]$(RESET)"
+	@curl -fsS http://localhost:8001/health >/dev/null
+	@echo "$(GREEN)✓ Routing controller healthy$(RESET)"
+	@$(MAKE) test-honeypots
+	@$(MAKE) test-routes
 
 ## Shell access
 shell-backend:
