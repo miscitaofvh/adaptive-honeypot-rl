@@ -58,7 +58,7 @@ echo "[1/6] Create dummy model (always SSTI for HTTP)..."
 python control_plane/rl_agent/create_dummy_ssti_model.py --output "$MODEL_PATH"
 
 echo "[2/6] Start gateway + routing_controller in NORMAL mode (control plane async, service-first)..."
-TEST_HONEYPOT=false RL_POLICY_MODE=model docker compose up -d --build gateway routing_controller >/dev/null
+TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=model docker compose up -d --build gateway routing_controller >/dev/null
 wait_for_controller
 
 echo "[3/6] Reload model in routing controller..."

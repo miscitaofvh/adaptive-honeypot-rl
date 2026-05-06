@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model clear-routes test-rl-split-ip test-adaptive-web validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model clear-routes test-rl-split-ip test-adaptive-web validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -7,6 +7,7 @@ DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 GATEWAY_URL := http://localhost:18080
 RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
+EXPOSURE_SERVICES := gateway backend cmdi_pot sqli_pot ssti_pot ssrf_pot routing_controller llm_analyzer
 
 # Colors for output
 CYAN := \033[0;36m
@@ -33,9 +34,11 @@ help:
 	@echo "  $(CYAN)ps$(RESET)                 Show running containers status"
 	@echo ""
 	@echo "$(YELLOW)MODE SWITCHING:$(RESET)"
-	@echo "  $(CYAN)mode-normal$(RESET)        Switch to production mode (TEST_HONEYPOT=false)"
-	@echo "  $(CYAN)mode-honeypot$(RESET)      Switch to honeypot mode (TEST_HONEYPOT=true)"
-	@echo "  $(CYAN)mode-show$(RESET)          Show current mode (TEST_HONEYPOT value)"
+	@echo "  $(CYAN)mode-normal$(RESET)        Switch traffic mode to normal-first (TEST_HONEYPOT=false)"
+	@echo "  $(CYAN)mode-honeypot$(RESET)      Switch traffic mode to endpoint honeypots (TEST_HONEYPOT=true)"
+	@echo "  $(CYAN)mode-debug$(RESET)         Enable operator/debug endpoints and detailed health metadata"
+	@echo "  $(CYAN)mode-attack$(RESET)        Hide debug endpoints/metadata for attacker-facing demos"
+	@echo "  $(CYAN)mode-show$(RESET)          Show current traffic and exposure modes"
 	@echo ""
 	@echo "$(YELLOW)MONITORING & LOGS:$(RESET)"
 	@echo "  $(CYAN)logs$(RESET)               Show logs from all services"
@@ -172,13 +175,47 @@ mode-honeypot:
 	@sleep 3
 	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
 
+mode-debug:
+	@echo "$(CYAN)[Switching to DEBUG exposure mode (EXPOSURE_MODE=debug)]$(RESET)"
+	@test -f .env || cp .env.example .env
+	@if grep -q '^EXPOSURE_MODE=' .env; then \
+		sed -i.bak 's/EXPOSURE_MODE=.*/EXPOSURE_MODE=debug/' .env; \
+	else \
+		printf '\nEXPOSURE_MODE=debug\n' >> .env; \
+	fi
+	@echo "$(YELLOW)Updated .env file$(RESET)"
+	@$(DOCKER_COMPOSE) up -d --no-deps --build --force-recreate $(EXPOSURE_SERVICES)
+	@echo "$(GREEN)✓ Debug exposure enabled$(RESET)"
+	@sleep 3
+	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
+
+mode-attack:
+	@echo "$(CYAN)[Switching to ATTACK exposure mode (EXPOSURE_MODE=attack)]$(RESET)"
+	@test -f .env || cp .env.example .env
+	@if grep -q '^EXPOSURE_MODE=' .env; then \
+		sed -i.bak 's/EXPOSURE_MODE=.*/EXPOSURE_MODE=attack/' .env; \
+	else \
+		printf '\nEXPOSURE_MODE=attack\n' >> .env; \
+	fi
+	@echo "$(YELLOW)Updated .env file$(RESET)"
+	@$(DOCKER_COMPOSE) up -d --no-deps --build --force-recreate $(EXPOSURE_SERVICES)
+	@echo "$(GREEN)✓ Attack-facing exposure enabled$(RESET)"
+	@sleep 3
+	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
+
 mode-show:
 	@echo "$(CYAN)Current mode:$(RESET)"
-	@grep "^TEST_HONEYPOT" .env
+	@grep "^TEST_HONEYPOT" .env || echo "TEST_HONEYPOT=false (default)"
+	@grep "^EXPOSURE_MODE" .env || echo "EXPOSURE_MODE=debug (default)"
 	@if grep -q "TEST_HONEYPOT=true" .env; then \
 		echo "$(YELLOW)Status: HONEYPOT MODE (traffic → honeypots)$(RESET)"; \
 	else \
 		echo "$(YELLOW)Status: NORMAL MODE (traffic → real backend)$(RESET)"; \
+	fi
+	@if grep -q "EXPOSURE_MODE=attack" .env; then \
+		echo "$(YELLOW)Exposure: ATTACK MODE (debug surface hidden)$(RESET)"; \
+	else \
+		echo "$(YELLOW)Exposure: DEBUG MODE (operator endpoints enabled)$(RESET)"; \
 	fi
 
 ## Testing
@@ -208,6 +245,10 @@ test-all: test-api test-cmdi
 
 test-routes:
 	@echo "$(CYAN)[Testing Core API Routes...]$(RESET)"
+	@MODE=$$(grep '^EXPOSURE_MODE=' .env 2>/dev/null | cut -d= -f2); \
+	case "$$MODE" in ""|debug|dev|development|operator|test) ;; \
+		*) echo "$(RED)FAIL: test-routes needs EXPOSURE_MODE=debug because it uses /routes$(RESET)"; exit 1 ;; \
+	esac
 	@curl -fsS -X DELETE http://localhost:8001/routes >/dev/null 2>&1 || true
 	@echo ""
 	@echo "$(YELLOW)1. Health Check (/api/health):$(RESET)"
@@ -242,6 +283,10 @@ test-routes:
 
 clear-routes:
 	@echo "$(CYAN)[Clearing adaptive route maps...]$(RESET)"
+	@MODE=$$(grep '^EXPOSURE_MODE=' .env 2>/dev/null | cut -d= -f2); \
+	case "$$MODE" in ""|debug|dev|development|operator|test) ;; \
+		*) echo "$(RED)clear-routes uses debug-only /routes. Run make mode-debug first.$(RESET)"; exit 1 ;; \
+	esac
 	@curl -fsS -X DELETE http://localhost:8001/routes
 
 test-honeypots:
@@ -327,16 +372,19 @@ health:
 	@curl -s -I http://localhost:8404/stats 2>&1 | head -1 || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Backend:$(RESET)"
-	@curl -s $(GATEWAY_URL)/api/health | jq -r '.service' 2>/dev/null || echo "❌ Unreachable"
+	@curl -s $(GATEWAY_URL)/api/health | jq . 2>/dev/null || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Frontend:$(RESET)"
 	@curl -s -I $(GATEWAY_URL) 2>&1 | head -1 || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Honeypots (direct ports):$(RESET)"
 	@for p in 5002 5003 5004 5005; do \
-		service=$$(curl -s "http://localhost:$$p/api/health" | jq -r '.service' 2>/dev/null); \
+		body=$$(curl -s "http://localhost:$$p/api/health"); \
+		service=$$(printf '%s' "$$body" | jq -r '.service // empty' 2>/dev/null); \
 		if [ -n "$$service" ]; then \
 			echo "  • Port $$p → $$service"; \
+		elif printf '%s' "$$body" | jq -e '.status == "ok"' >/dev/null 2>&1; then \
+			echo "  • Port $$p → healthy (generic attack-mode health)"; \
 		else \
 			echo "  • Port $$p → unreachable"; \
 		fi; \
@@ -390,6 +438,8 @@ info:
 	@echo "  make test-api           # Test API"
 	@echo "  make mode-honeypot      # Switch to honeypot mode"
 	@echo "  make mode-normal        # Switch to normal mode"
+	@echo "  make mode-debug         # Enable debug/operator exposure"
+	@echo "  make mode-attack        # Hide debug surface for demos"
 	@echo ""
 
 version:

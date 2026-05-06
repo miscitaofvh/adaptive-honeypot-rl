@@ -4,6 +4,8 @@ from flask import request, g
 
 POT_TYPE = os.environ.get('POT_TYPE','unknown')
 SERVICE_NAME = os.environ.get('SERVICE_NAME','honeypot')
+EXPOSURE_MODE = os.environ.get('EXPOSURE_MODE', 'debug').strip().lower()
+DEBUG_EXPOSURE_VALUES = {'debug', 'dev', 'development', 'operator', 'test'}
 SENSITIVE_KEYS = {'password', 'token', 'access_token', 'authorization', 'secret'}
 MAX_BODY_PREVIEW = 2048
 
@@ -11,6 +13,16 @@ logger = logging.getLogger('honeypot')
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     h = logging.StreamHandler(); h.setFormatter(logging.Formatter('%(message)s')); logger.addHandler(h)
+logger.propagate = False
+
+def is_debug_exposure():
+    return EXPOSURE_MODE in DEBUG_EXPOSURE_VALUES
+
+def health_payload(service_name=None):
+    payload = {'status': 'ok'}
+    if is_debug_exposure():
+        payload['service'] = service_name or SERVICE_NAME
+    return payload
 
 def log_request(extra=None):
     body_preview, payload_size = _safe_body()

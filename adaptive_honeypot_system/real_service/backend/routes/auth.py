@@ -2,6 +2,10 @@ from flask import Blueprint
 
 auth_bp = Blueprint('auth', __name__)
 
+
+def _text(value):
+    return value.strip() if isinstance(value, str) else ''
+
 @auth_bp.post('/login')
 def login():
     from flask import request, jsonify
@@ -10,8 +14,8 @@ def login():
     from flask_jwt_extended import create_access_token
     
     data = request.get_json(silent=True) or {}
-    username = data.get('username','').strip()
-    password = data.get('password','').strip()
+    username = _text(data.get('username'))
+    password = _text(data.get('password'))
     
     if not username or not password:
         return jsonify(message='Username and password required'), 400
@@ -20,7 +24,7 @@ def login():
     if not user or not check_password_hash(user.password_hash, password):
         return jsonify(message='Invalid credentials'), 401
     
-    token = create_access_token(identity=user.id)
+    token = create_access_token(identity=str(user.id))
     return jsonify(access_token=token, user=user.to_dict())
 
 @auth_bp.post('/register')
@@ -30,8 +34,8 @@ def register():
     from models import User, db
     
     data = request.get_json(silent=True) or {}
-    username = data.get('username','').strip()
-    password = data.get('password','').strip()
+    username = _text(data.get('username'))
+    password = _text(data.get('password'))
     
     if not username or not password:
         return jsonify(message='Username and password required'), 400

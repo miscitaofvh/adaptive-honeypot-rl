@@ -9,11 +9,11 @@ Chuc nang:
 - Route `/api/*` vao real backend hoac web honeypots.
 - Doc `sid` cookie de ho tro mid-session rerouting cho Web.
 - Doc source-IP map de ho tro test split-client va sau nay mo rong L4.
-- Expose HAProxy stats tai `localhost:8404/stats`.
+- Expose HAProxy stats tai `localhost:8404/stats` trong debug mode.
 
 File chinh:
 
-- `entrypoint.sh`: chon config theo `TEST_HONEYPOT`.
+- `entrypoint.sh`: chon config theo `TEST_HONEYPOT` va an stats UI theo `EXPOSURE_MODE`.
 - `haproxy.normal.cfg`: normal-first mode, mac dinh API vao `normal_api`.
 - `haproxy.honeypot.cfg`: honeypot test mode, map endpoint sang web honeypot.
 - `routing_update.sh`: cap nhat HAProxy map file va runtime map qua admin socket.
@@ -28,3 +28,4 @@ Luu y:
 
 - Gateway hien la HTTP-only. L4 Drop-and-Catch trong proposal chua implement.
 - Control plane khong nam tren request path; no chi cap nhat map bat dong bo.
+- `EXPOSURE_MODE=attack` cat block Stats UI khoi HAProxy config runtime; admin socket van duoc giu trong container de routing controller cap nhat map.

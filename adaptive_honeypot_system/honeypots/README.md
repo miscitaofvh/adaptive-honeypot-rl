@@ -20,6 +20,11 @@ Shared files:
 - `base.py`: middleware structured JSON logging.
 - `fake_data.py`: fake users/articles va token helper.
 
+Exposure modes:
+
+- `EXPOSURE_MODE=debug`: `/api/health` hien `service` de test direct port va route map.
+- `EXPOSURE_MODE=attack`: `/api/health` chi hien `{"status":"ok"}` de attacker khong nhin thay loai honeypot dang nam sau gateway.
+
 Logging:
 
 - Log co `event_type=honeypot_interaction`.
@@ -30,4 +35,3 @@ Luu y:
 
 - Day khong phai high-interaction honeypot.
 - Response co tinh "engagement" nhung khong thuc thi command, SQL, template, hay request noi bo that.
-

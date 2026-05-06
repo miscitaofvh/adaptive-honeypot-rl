@@ -42,6 +42,9 @@ MODEL_PATH = Path(os.getenv("RL_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
 ROUTING_SCRIPT = Path(os.getenv("ROUTING_UPDATE_SCRIPT", str(DEFAULT_ROUTING_SCRIPT)))
 COMMAND_TIMEOUT_SECONDS = float(os.getenv("ROUTING_COMMAND_TIMEOUT", "5"))
 POLICY_MODE = os.getenv("RL_POLICY_MODE", "model").strip().lower()
+EXPOSURE_MODE = os.getenv("EXPOSURE_MODE", "debug").strip().lower()
+DEBUG_EXPOSURE_VALUES = {"debug", "dev", "development", "operator", "test"}
+DEBUG_EXPOSURE = EXPOSURE_MODE in DEBUG_EXPOSURE_VALUES
 HEURISTIC_ROUTE_THRESHOLD = float(os.getenv("HEURISTIC_ROUTE_THRESHOLD", "0.45"))
 L4_ROUTING_ENABLED = os.getenv("L4_ROUTING_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 SESSION_ROUTES_MAP = Path(os.getenv("SESSION_ROUTES_MAP", "/etc/haproxy/maps/session_routes.map"))
@@ -144,6 +147,11 @@ def ensure_valid_backend(backend: str, protocol: str = "http") -> str:
             },
         )
     return backend
+
+
+def require_debug_exposure() -> None:
+    if not DEBUG_EXPOSURE:
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def ensure_valid_ip(source_ip: str) -> str:
@@ -327,7 +335,13 @@ def try_load_model(path: Path) -> tuple[bool, str]:
     return True, f"Model loaded from {path}"
 
 
-app = FastAPI(title="Adaptive Routing Controller", version="0.1.0")
+app = FastAPI(
+    title="Adaptive Routing Controller",
+    version="0.1.0",
+    docs_url="/docs" if DEBUG_EXPOSURE else None,
+    redoc_url="/redoc" if DEBUG_EXPOSURE else None,
+    openapi_url="/openapi.json" if DEBUG_EXPOSURE else None,
+)
 
 
 @app.on_event("startup")
@@ -338,8 +352,12 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
+    if not DEBUG_EXPOSURE:
+        return {"status": "ok"}
+
     return {
         "status": "ok",
+        "exposure_mode": EXPOSURE_MODE,
         "model_path": str(MODEL_PATH),
         "routing_script": str(ROUTING_SCRIPT),
         "model_exists": MODEL_PATH.exists(),
@@ -352,12 +370,14 @@ def health() -> dict:
 
 @app.post("/model/reload", response_model=ReloadModelResponse)
 def reload_model() -> ReloadModelResponse:
+    require_debug_exposure()
     loaded, message = try_load_model(MODEL_PATH)
     return ReloadModelResponse(loaded=loaded, model_path=str(MODEL_PATH), message=message)
 
 
 @app.post("/route/session/{session_id}", response_model=RouteUpdateResponse)
 def set_session_route(session_id: str, backend: str = Query(..., description="Target backend name")) -> RouteUpdateResponse:
+    require_debug_exposure()
     if not ROUTING_SCRIPT.exists():
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
@@ -373,6 +393,7 @@ def set_session_route(session_id: str, backend: str = Query(..., description="Ta
 
 @app.post("/route/ip/{source_ip}", response_model=RouteUpdateResponse)
 def set_ip_route(source_ip: str, backend: str = Query(..., description="Target backend name")) -> RouteUpdateResponse:
+    require_debug_exposure()
     if not ROUTING_SCRIPT.exists():
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
@@ -407,6 +428,7 @@ def decide(req: DecisionRequest) -> DecisionResponse:
 
 @app.delete("/route/session/{session_id}")
 def clear_session_route(session_id: str) -> dict:
+    require_debug_exposure()
     if not ROUTING_SCRIPT.exists():
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
@@ -420,6 +442,7 @@ def clear_session_route(session_id: str) -> dict:
 
 @app.delete("/route/ip/{source_ip}")
 def clear_ip_route(source_ip: str) -> dict:
+    require_debug_exposure()
     if not ROUTING_SCRIPT.exists():
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
@@ -434,6 +457,7 @@ def clear_ip_route(source_ip: str) -> dict:
 
 @app.delete("/routes", response_model=ClearRoutesResponse)
 def clear_routes() -> ClearRoutesResponse:
+    require_debug_exposure()
     if not ROUTING_SCRIPT.exists():
         raise HTTPException(status_code=500, detail=f"Routing script not found: {ROUTING_SCRIPT}")
 
@@ -449,6 +473,7 @@ def clear_routes() -> ClearRoutesResponse:
 
 @app.get("/routes")
 def list_routes() -> dict:
+    require_debug_exposure()
     return {
         "status": "ok",
         "session_routes": read_map(SESSION_ROUTES_MAP),
@@ -458,6 +483,7 @@ def list_routes() -> dict:
 
 @app.get("/route/session/{session_id}")
 def get_session_route(session_id: str) -> dict:
+    require_debug_exposure()
     routes = read_map(SESSION_ROUTES_MAP)
     return {
         "status": "ok",
@@ -469,6 +495,7 @@ def get_session_route(session_id: str) -> dict:
 
 @app.get("/route/ip/{source_ip}")
 def get_ip_route(source_ip: str) -> dict:
+    require_debug_exposure()
     safe_ip = ensure_valid_ip(source_ip)
     routes = read_map(IP_HONEYPOT_MAP)
     return {

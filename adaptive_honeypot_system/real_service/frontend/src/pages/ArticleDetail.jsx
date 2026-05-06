@@ -27,7 +27,7 @@ export default function ArticleDetail() {
           <span>📌 {article.category}</span>
           <span>⏱️ {article.read_time} min</span>
         </div>
-        <div style={{ lineHeight: 1.8, color: 'var(--text)' }} dangerouslySetInnerHTML={{ __html: article.content || article.summary }} />
+        <div style={{ lineHeight: 1.8, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{article.content || article.summary}</div>
       </div>
     </main>
   )

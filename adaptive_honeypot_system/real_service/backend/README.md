@@ -27,6 +27,11 @@ Endpoints quan trong:
 - `POST /api/tools/ping`
 - `POST /api/tools/fetch`
 
+Exposure modes:
+
+- `EXPOSURE_MODE=debug`: `GET /api/health` tra ve `status` va `service` de test routing.
+- `EXPOSURE_MODE=attack`: `GET /api/health` chi tra ve `{"status":"ok"}` de khong lo backend dang la real service hay honeypot.
+
 Logging:
 
 - `logging_utils.py` cai dat before/after request hooks.
@@ -37,4 +42,3 @@ Luu y:
 
 - Backend khong co muc tieu bao ve service.
 - Endpoint search dung SQLAlchemy filter an toan; attack engagement duoc tao o honeypot sau khi route.
-

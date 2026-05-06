@@ -9,6 +9,18 @@ from routes.articles import articles_bp
 from routes.tools import tools_bp
 from logging_utils import install_request_logging
 
+
+DEBUG_EXPOSURE_VALUES = {'debug', 'dev', 'development', 'operator', 'test'}
+
+
+def _exposure_mode():
+    return os.environ.get('EXPOSURE_MODE', 'debug').strip().lower()
+
+
+def _debug_exposure_enabled(app):
+    return app.config.get('EXPOSURE_MODE', 'debug') in DEBUG_EXPOSURE_VALUES
+
+
 def create_app():
     app = Flask(__name__)
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY','dev-secret')
@@ -17,6 +29,7 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JSON_SORT_KEYS'] = False
     app.config['SERVICE_NAME'] = os.environ.get('SERVICE_NAME','real-backend')
+    app.config['EXPOSURE_MODE'] = _exposure_mode()
     
     CORS(app, resources={r"/api/*":{"origins":"*"}})
     install_request_logging(app)
@@ -29,6 +42,8 @@ def create_app():
 
     @app.get('/api/health')
     def health():
+        if not _debug_exposure_enabled(app):
+            return {'status':'ok'}
         return {'status':'ok','service':app.config['SERVICE_NAME']}
 
     _initialize_database(app)

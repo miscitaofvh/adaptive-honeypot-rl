@@ -1,11 +1,12 @@
 # Báo cáo tiến độ
 
-Cập nhật: 2026-05-05
+Cập nhật: 2026-05-06
 
 ## 1) Tổng quan hiện tại
 
 Dự án đã hoạt động đủ cho data plane + control plane trong web scope:
 - Data plane: gateway HAProxy + real backend/frontend + 4 web honeypot.
+- Exposure mode: `debug` cho operator/test, `attack` cho demo attacker-facing.
 - Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
 - RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode.
 - Dummy LLM analyzer: đã có service tạm thời poll Elasticsearch, dựng state 24D và gọi routing controller bất đồng bộ.
@@ -23,12 +24,13 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
   - `/api/tools/fetch` -> SSRF
   - `/api/articles/search` -> SQLI
 - [x] `/api/health` route riêng về real backend (`health_api`).
+- [x] `EXPOSURE_MODE=debug|attack`: debug mode giu endpoint/metadata test; attack mode an service identity, `/routes`, `/analyze`, docs/OpenAPI, HAProxy Stats UI.
 - [x] Session map steering và source-IP map steering qua `routing_update.sh`.
 - [x] Real backend có `POST /api/articles/search` để khớp SQLI honeypot contract.
 - [x] Gỡ config HAProxy legacy không dùng (`gateway/haproxy.cfg`) để tránh nhầm lẫn.
 
 ### Control plane + RL
-- [x] `routing_controller` expose đầy đủ API: `/health`, `/model/reload`, `/decide`, add/remove route theo session/IP.
+- [x] `routing_controller` expose `/decide`; cac API operator nhu `/model/reload`, add/remove route, inspect route map chi bat trong debug mode.
 - [x] Refactor train offline sang PyTorch trong `train_offline.py`.
 - [x] Thêm `requirements-local.txt` cho train local (`torch` local-only).
 - [x] Runtime controller vẫn dùng JSON linear weights (`LinearQAgent`), không cần torch trong container.

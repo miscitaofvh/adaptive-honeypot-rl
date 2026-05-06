@@ -21,5 +21,10 @@ Important constraints:
 
 Runtime endpoints:
 
-- `GET /health`
-- `POST /analyze` for manual/debug event injection
+- `GET /health`: debug mode tra ve analyzer stats; attack mode chi tra ve `{"status":"ok"}`.
+- `POST /analyze`: manual/debug event injection, chi bat trong `EXPOSURE_MODE=debug`.
+
+Exposure modes:
+
+- `EXPOSURE_MODE=debug`: bat docs/OpenAPI, health stats, va `/analyze`.
+- `EXPOSURE_MODE=attack`: tat docs/OpenAPI, an analyzer stats, va tra `404` cho `/analyze`.

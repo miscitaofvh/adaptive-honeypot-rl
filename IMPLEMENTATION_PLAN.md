@@ -1,6 +1,6 @@
 # Ke hoach hoan thien Adaptive Honeypot RL
 
-Ngay cap nhat: 2026-05-05
+Ngay cap nhat: 2026-05-06
 
 Muc dich cua file nay: lam tai lieu dieu huong cho cac lan implement tiep theo. Neu Codex quay lai repo nay, doc file nay truoc `README.md`, `Progress.md`, va `proposal.md`, sau do lam theo thu tu o muc "Next execution plan".
 
@@ -17,6 +17,7 @@ Trang thai sau dot implement 2026-05-05:
 - LLM analyzer that va RL policy that chua implement. Hien tai chi co dummy/rule-based analyzer va dummy heuristic policy.
 - L4 SSH/FTP/SMTP Drop-and-Catch chua implement. Controller/gateway da fail ro rang neu dung L4 placeholder.
 - Route maps duoc clear sau E2E tests de tranh stale state.
+- Da co `EXPOSURE_MODE=debug|attack`: debug giu operator endpoints/metadata; attack an service identity, route/analyzer debug APIs, docs/OpenAPI, va HAProxy Stats UI.
 
 ## 2) Verified commands
 
@@ -51,7 +52,8 @@ Ket qua quan trong:
 | --- | --- | --- | --- |
 | Web data plane | DONE for MVP | HAProxy normal/honeypot mode, session/IP route maps, 4 web honeypot, real backend/frontend | Benchmark multi-session, contract tests chuan hon |
 | Real backend contract | DONE for MVP | Them `POST /api/articles/search`, frontend client `searchArticles`, DB init lock | Formal contract pytest suite, more edge cases |
-| Routing controller | DONE for MVP | `/decide`, model reload, heuristic mode, backend validation, inspect routes, `DELETE /routes`, L4 disabled 501 | Unit tests, route history store, policy cooldown in controller |
+| Routing controller | DONE for MVP | `/decide`, model reload/debug endpoints, heuristic mode, backend validation, inspect routes, `DELETE /routes`, L4 disabled 501, attack-mode endpoint hiding | Unit tests, route history store, policy cooldown in controller |
+| Demo exposure surface | DONE for MVP | `EXPOSURE_MODE=debug|attack`, generic health in attack mode, `/routes`/`/analyze` hidden, HAProxy Stats UI disabled | Network-level compose override to publish only gateway in attack demo |
 | Gateway route updates | DONE for MVP | Idempotent map update/remove, clear all maps, `drop_connection` fail ro rang | L4 drop implementation neu chon lam Phase 8 |
 | Structured logging | DONE for MVP | JSON logs cho backend/honeypots, request/session/body preview, masking co ban | Gateway selected-backend parsing, Kibana dashboard |
 | Filebeat/ES | DONE for MVP | Docker log ingest, JSON decode, bo hardcoded container IDs, giu controller/analyzer logs | Saved searches/dashboard, retention/index template polish |
@@ -75,6 +77,7 @@ Done:
   - Calls routing controller `/decide`.
   - Does not process old logs before analyzer startup.
   - Only `real-backend` events create route decisions in dummy milestone.
+  - `EXPOSURE_MODE=attack` hides `/analyze`, docs/OpenAPI, and detailed health stats.
 
 - `adaptive_honeypot_system/control_plane/llm_analyzer/test_adaptive_web_flow.sh`
   - E2E Web MVP test for log -> analyzer -> route -> honeypot.
@@ -92,6 +95,7 @@ Done:
   - Adds route cleanup:
     - `DELETE /routes`
   - Logs route decisions as structured JSON.
+  - `EXPOSURE_MODE=attack` hides operator/debug endpoints with 404 and keeps generic `/health`.
 
 - `adaptive_honeypot_system/control_plane/rl_agent/create_dummy_web_policy_model.py`
   - Creates deterministic subtype-based dummy web model artifact.

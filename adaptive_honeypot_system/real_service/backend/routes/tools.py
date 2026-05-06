@@ -1,4 +1,12 @@
-import re, time, requests as req_lib, markdown, bleach, ping3
+import ipaddress
+import re
+import time
+from urllib.parse import urlparse
+
+import bleach
+import markdown
+import ping3
+import requests as req_lib
 from flask import Blueprint, request, jsonify
 
 tools_bp = Blueprint('tools', __name__)
@@ -6,10 +14,62 @@ tools_bp = Blueprint('tools', __name__)
 ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + ['h1','h2','h3','h4','h5','h6','p','pre','code','blockquote','ul','ol','li','hr','br','table','thead','tbody','tr','th','td']
 ALLOWED_ATTRS = {**bleach.sanitizer.ALLOWED_ATTRIBUTES, 'code':['class'], 'pre':['class']}
 
+
+def _bounded_int(value, default, minimum=1, maximum=10):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return min(max(parsed, minimum), maximum)
+
+
+def _text(value):
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _is_private_or_internal_host(hostname):
+    host = (hostname or '').strip().strip('[]').rstrip('.').lower()
+    if not host:
+        return True
+
+    if host == 'localhost' or host.endswith('.localhost'):
+        return True
+
+    # Docker service names and short intranet names should not be fetched by the real service.
+    if '.' not in host:
+        return True
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+
+    return any((
+        ip.is_private,
+        ip.is_loopback,
+        ip.is_link_local,
+        ip.is_multicast,
+        ip.is_reserved,
+        ip.is_unspecified,
+    ))
+
+
+def _validate_public_http_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in {'http', 'https'}:
+        return False, 'Only HTTP/HTTPS URLs are supported.'
+    if _is_private_or_internal_host(parsed.hostname):
+        return False, 'Private or internal URLs are not supported by the real service.'
+    return True, ''
+
 @tools_bp.post('/preview')
 def preview():
     data = request.get_json(silent=True) or {}
-    content = (data.get('content') or '')[:32_000]
+    content = _text(data.get('content'))[:32_000]
     rendered = markdown.markdown(content, extensions=['fenced_code','tables','nl2br'])
     safe = bleach.clean(rendered, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS)
     word_count = len(re.findall(r'\w+', content))
@@ -18,8 +78,8 @@ def preview():
 @tools_bp.post('/ping')
 def ping_handler():
     data = request.get_json(silent=True) or {}
-    host = (data.get('host') or '').strip()
-    count = min(max(1,int(data.get('count',4))),10)
+    host = _text(data.get('host'))
+    count = _bounded_int(data.get('count', 4), 4, 1, 10)
     
     if not host:
         return jsonify(message='host is required'), 400
@@ -35,7 +95,7 @@ def ping_handler():
                 if delay:
                     latencies.append(delay * 1000)
                     reachable = True
-            except:
+            except Exception:
                 pass
         
         avg_latency = sum(latencies) / len(latencies) if latencies else None
@@ -47,12 +107,13 @@ def ping_handler():
 @tools_bp.post('/fetch')
 def fetch():
     data = request.get_json(silent=True) or {}
-    url = (data.get('url') or '').strip()
+    url = _text(data.get('url'))
     
     if not url:
         return jsonify(message='url is required'), 400
-    if not re.match(r'^https?://', url):
-        return jsonify(message='Only HTTP/HTTPS URLs are supported.'), 400
+    ok, message = _validate_public_http_url(url)
+    if not ok:
+        return jsonify(message=message), 400
     
     try:
         start = time.monotonic()

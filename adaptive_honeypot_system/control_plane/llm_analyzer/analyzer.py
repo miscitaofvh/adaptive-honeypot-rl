@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 
@@ -26,6 +26,9 @@ ANALYZER_WINDOW_SECONDS = int(os.getenv("ANALYZER_WINDOW_SECONDS", "300"))
 ANALYZER_MAX_EVENTS = int(os.getenv("ANALYZER_MAX_EVENTS", "150"))
 ANALYZER_APPLY_ROUTE = os.getenv("ANALYZER_APPLY_ROUTE", "true").strip().lower() in {"1", "true", "yes"}
 ANALYZER_ENABLED = os.getenv("ANALYZER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+EXPOSURE_MODE = os.getenv("EXPOSURE_MODE", "debug").strip().lower()
+DEBUG_EXPOSURE_VALUES = {"debug", "dev", "development", "operator", "test"}
+DEBUG_EXPOSURE = EXPOSURE_MODE in DEBUG_EXPOSURE_VALUES
 ROUTE_COOLDOWN_SECONDS = float(os.getenv("ROUTE_COOLDOWN_SECONDS", "5"))
 ANALYZER_STARTED_AT = datetime.now(timezone.utc)
 
@@ -91,7 +94,18 @@ stats = {
     "last_poll_at": "",
 }
 
-app = FastAPI(title="Dummy LLM Analyzer", version="0.1.0")
+app = FastAPI(
+    title="Dummy LLM Analyzer",
+    version="0.1.0",
+    docs_url="/docs" if DEBUG_EXPOSURE else None,
+    redoc_url="/redoc" if DEBUG_EXPOSURE else None,
+    openapi_url="/openapi.json" if DEBUG_EXPOSURE else None,
+)
+
+
+def require_debug_exposure() -> None:
+    if not DEBUG_EXPOSURE:
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def now_iso() -> str:
@@ -303,8 +317,11 @@ def startup() -> None:
     thread.start()
 
 
-@app.get("/health", response_model=AnalyzerStats)
-def health() -> AnalyzerStats:
+@app.get("/health")
+def health() -> dict[str, Any]:
+    if not DEBUG_EXPOSURE:
+        return {"status": "ok"}
+
     return AnalyzerStats(
         enabled=ANALYZER_ENABLED,
         elasticsearch_url=ELASTICSEARCH_URL,
@@ -313,9 +330,10 @@ def health() -> AnalyzerStats:
         decisions=int(stats["decisions"]),
         last_error=str(stats["last_error"]),
         last_poll_at=str(stats["last_poll_at"]),
-    )
+    ).model_dump()
 
 
 @app.post("/analyze")
 def analyze(event: AnalyzeEventRequest) -> dict[str, Any]:
+    require_debug_exposure()
     return process_event(event.model_dump(), apply_route=event.apply_route)

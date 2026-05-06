@@ -42,7 +42,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[1/5] Start Web MVP stack in normal-first mode with dummy heuristic RL..."
-TEST_HONEYPOT=false RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true docker compose up -d --build --force-recreate \
+TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true docker compose up -d --build --force-recreate \
   elasticsearch \
   backend \
   sqli_pot \

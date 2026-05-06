@@ -19,6 +19,7 @@ def _logger() -> logging.Logger:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
+    logger.propagate = False
     return logger
 
 
@@ -84,4 +85,3 @@ def install_request_logging(app) -> None:
         response.headers["X-Request-ID"] = record["request_id"]
         _logger().info(json.dumps(record, ensure_ascii=True))
         return response
-

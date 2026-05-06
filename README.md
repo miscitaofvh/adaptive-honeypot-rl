@@ -5,6 +5,7 @@
 
 Kiến trúc hiện tại:
 - Data plane: HAProxy gateway với 2 mode normal/honeypot.
+- Exposure mode: debug/operator surface hoặc attacker-facing surface.
 - Real service: Flask backend + React frontend.
 - Lớp honeypot web: CMDI, SQLI, SSTI, SSRF.
 - Control plane: FastAPI routing controller + RL model loading/inference.
@@ -15,11 +16,12 @@ Nguyên tắc quan trọng: control plane chạy bất đồng bộ với luồn
 
 ## 2) Trạng thái hiện tại
 - Đã có route theo mode qua `TEST_HONEYPOT=true|false`.
+- Đã có exposure mode qua `EXPOSURE_MODE=debug|attack`.
 - Đã có map endpoint -> honeypot trong honeypot mode.
 - Đã có route riêng `/api/health` về real backend ở cả 2 mode.
 - Đã có dynamic routing theo session và source IP qua HAProxy map.
-- Đã có API routing controller (`/health`, `/model/reload`, `/decide`, add/remove route).
-- Đã có API inspect route map (`/routes`, `GET /route/session/{sid}`, `GET /route/ip/{ip}`).
+- Đã có API routing controller (`/health`, `/decide`, và debug-only `/model/reload`, add/remove route).
+- Đã có API inspect route map trong debug mode (`/routes`, `GET /route/session/{sid}`, `GET /route/ip/{ip}`).
 - Đã có API/target dọn route map (`DELETE /routes`, `make clear-routes`) để test không để lại trạng thái bẩn.
 - Đã có structured JSON logging cho real backend và honeypots.
 - Đã có `POST /api/articles/search` ở real backend để khớp SQLI honeypot contract.
@@ -59,6 +61,9 @@ test_honeypots.py  (ở root repo)
 - Gateway đọc `TEST_HONEYPOT` trong `.env`:
   - `false` -> `haproxy.normal.cfg`
   - `true` -> `haproxy.honeypot.cfg`
+- Các service đọc `EXPOSURE_MODE` trong `.env`:
+  - `debug` -> hiện operator endpoints, docs/OpenAPI, detailed health metadata.
+  - `attack` -> ẩn service identity, tắt `/routes`, `/analyze`, docs/OpenAPI, và HAProxy Stats UI.
 
 ### Normal mode
 - Mặc định request vào real backend.
@@ -79,23 +84,18 @@ test_honeypots.py  (ở root repo)
 - Script cập nhật: `gateway/routing_update.sh`
 
 ## 6) API control plane
-- `GET /health`
-- `POST /model/reload`
 - `POST /decide`
-- `POST /route/session/{session_id}`
-- `DELETE /route/session/{session_id}`
-- `GET /route/session/{session_id}`
-- `POST /route/ip/{source_ip}`
-- `DELETE /route/ip/{source_ip}`
-- `GET /route/ip/{source_ip}`
-- `GET /routes`
-- `DELETE /routes`
+- `GET /health`: detailed trong debug mode, generic `{"status":"ok"}` trong attack mode.
+- Debug-only: `POST /model/reload`
+- Debug-only: `POST|DELETE|GET /route/session/{session_id}`
+- Debug-only: `POST|DELETE|GET /route/ip/{source_ip}`
+- Debug-only: `GET|DELETE /routes`
 
 URL dịch vụ: `http://localhost:8001`
 
 ## 6.1) Dummy analyzer
-- `GET /health`
-- `POST /analyze`
+- `GET /health`: detailed trong debug mode, generic trong attack mode.
+- Debug-only: `POST /analyze`
 
 URL dịch vụ: `http://localhost:8002`
 
@@ -116,6 +116,7 @@ make up
 ```bash
 cd adaptive_honeypot_system
 docker compose ps -a
+make mode-debug
 curl -s http://localhost:8001/health
 curl -s http://localhost:18080/api/health
 make test-routes
@@ -153,9 +154,9 @@ Lần chạy hợp nhất gần nhất (2026-05-05):
 
 ## 11) Service URLs
 - Gateway: `http://localhost:18080`
-- Routing controller: `http://localhost:8001`
-- Dummy analyzer: `http://localhost:8002`
-- HAProxy stats: `http://localhost:8404/stats`
+- Routing controller: `http://localhost:8001` (debug/operator)
+- Dummy analyzer: `http://localhost:8002` (debug/operator)
+- HAProxy stats: `http://localhost:8404/stats` (debug only)
 - Kibana: `http://localhost:5601`
 - Elasticsearch: `http://localhost:9200`
 - Honeypot direct ports:
