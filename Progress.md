@@ -1,6 +1,6 @@
 # Báo cáo tiến độ
 
-Cập nhật: 2026-05-06
+Cập nhật: 2026-05-07
 
 ## 1) Tổng quan hiện tại
 
@@ -9,8 +9,8 @@ Dự án đã hoạt động đủ cho data plane + control plane trong web scop
 - Exposure mode: `debug` cho operator/test, `attack` cho demo attacker-facing.
 - Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
 - RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode.
-- Dummy LLM analyzer: đã có service tạm thời poll Elasticsearch, dựng state 24D và gọi routing controller bất đồng bộ.
-- Observability: Filebeat -> Elasticsearch -> Kibana vẫn hoạt động.
+- LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) để trích xuất semantic features, dựng state 24D và gọi routing controller bất đồng bộ.
+- Observability: Filebeat -> Elasticsearch -> Kibana hoạt động. Service-level syslog forwarding thu thập HTTP request body từ backend/honeypot.
 
 Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ, không chặn request path.
 
@@ -40,6 +40,21 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] Chặn non-HTTP/L4 placeholder khi `L4_ROUTING_ENABLED=false`.
 - [x] Thêm dummy `llm_analyzer` service (`/health`, `/analyze`) cho flow `log -> state -> decide -> route`.
 - [x] Split-IP E2E `test_two_ip_split_routing.sh` pass (1 IP honeypot, 1 IP backend thật).
+
+### Logging pipeline
+- [x] Filebeat `drop_fields` loại bỏ metadata thừa (`agent`, `host`, `ecs`, `syslog`, `process`, v.v.) — ELK chỉ còn `@timestamp` + `app.*`.
+- [x] HAProxy syslog `len 8192` — fix User-Agent bị truncate.
+- [x] Service-level syslog forwarding: backend + 4 honeypot gửi structured JSON log qua UDP đến Filebeat port 5141.
+- [x] Filebeat `type: udp` input với JavaScript processor strip `<priority>` prefix và trailing NUL byte.
+- [x] HTTP request body capture tại service layer (Flask) — `body_preview` field với sensitive field masking (`password`, `token` → `[redacted]`).
+- [x] Fix ES field type conflict: `app.ts` thống nhất unix epoch integer giữa HAProxy và service logs.
+- [x] LLM analyzer two-pass enrichment: merge `body_preview` từ service logs vào gateway events theo `(session_id, method, path)`.
+
+### LLM analyzer — Groq API integration
+- [x] Thay `call_llm()` stub bằng Groq API call thật (model: `llama-3.3-70b-versatile`).
+- [x] System prompt trích xuất 8-field semantic output: `attack_category`, `web_subtype_scores`, `evasion_score`, `historical_intent_consistency`, `attack_progression_stage`, `intent_shift_velocity`, `llm_confidence`, `updated_memory_context`.
+- [x] Validation + clamping output fields về [0, 1], graceful degradation khi LLM lỗi.
+- [x] E2E verified: CMDi payload (`127.0.0.1; cat /etc/passwd`) → LLM detect cmdi (score 0.8) → route `test-llm-groq` → `cmdi_api` → request tiếp theo trên session đó đi vào honeypot.
 
 ### Test harness
 - [x] `test_honeypots.py` ở root repo hoạt động ổn định.
@@ -92,7 +107,7 @@ Kết quả:
 
 ## 6) Việc còn lại
 
-- [ ] Thay dummy `llm_analyzer` bằng LLM analyzer thật có memory/stateful analysis.
+- [x] ~~Thay dummy `llm_analyzer` bằng LLM analyzer thật có memory/stateful analysis.~~
 - [ ] Thay dummy policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
 - [ ] Hoàn thiện benchmark (route accuracy, false reroute, engagement).
 - [ ] Hoàn thiện L4 SSH/FTP/SMTP Drop-and-Catch nếu còn trong scope demo.

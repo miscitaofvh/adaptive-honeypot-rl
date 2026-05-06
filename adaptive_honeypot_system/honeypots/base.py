@@ -1,4 +1,4 @@
-import os, json, logging, time, uuid
+import os, json, logging, logging.handlers, socket, time, uuid
 from datetime import datetime, timezone
 from flask import request, g
 
@@ -8,11 +8,18 @@ EXPOSURE_MODE = os.environ.get('EXPOSURE_MODE', 'debug').strip().lower()
 DEBUG_EXPOSURE_VALUES = {'debug', 'dev', 'development', 'operator', 'test'}
 SENSITIVE_KEYS = {'password', 'token', 'access_token', 'authorization', 'secret'}
 MAX_BODY_PREVIEW = 2048
+FILEBEAT_HOST = os.environ.get('FILEBEAT_HOST', 'filebeat')
+FILEBEAT_SERVICE_PORT = int(os.environ.get('FILEBEAT_SERVICE_PORT', '5141'))
 
 logger = logging.getLogger('honeypot')
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     h = logging.StreamHandler(); h.setFormatter(logging.Formatter('%(message)s')); logger.addHandler(h)
+    try:
+        sh = logging.handlers.SysLogHandler(address=(FILEBEAT_HOST, FILEBEAT_SERVICE_PORT), socktype=socket.SOCK_DGRAM)
+        sh.setFormatter(logging.Formatter('%(message)s')); logger.addHandler(sh)
+    except Exception:
+        pass
 logger.propagate = False
 
 def is_debug_exposure():
@@ -27,7 +34,7 @@ def health_payload(service_name=None):
 def log_request(extra=None):
     body_preview, payload_size = _safe_body()
     record = {'event_schema_version':'1.0','event_type':'honeypot_interaction',
-              'ts':datetime.now(timezone.utc).isoformat(),'service':SERVICE_NAME,'pot_type':POT_TYPE,
+              'ts':int(datetime.now(timezone.utc).timestamp()),'service':SERVICE_NAME,'pot_type':POT_TYPE,
               'request_id':getattr(g,'request_id',''),'method':request.method,'path':request.path,
               'query':request.query_string.decode('utf-8', errors='replace'),
               'remote_addr':request.remote_addr,'x_forwarded_for':request.headers.get('X-Forwarded-For',''),

@@ -1,53 +1,57 @@
 filebeat.inputs:
-  - type: filestream
-    id: docker-container-logs
-    enabled: true
-    paths:
-      - /var/lib/docker/containers/*/*-json.log
-    parsers:
-      - ndjson:
-          target: "json"
-          message_key: log
-          add_error_key: true
+  # HAProxy gateway logs (syslog over UDP)
+  - type: syslog
+    format: rfc5424
+    protocol.udp:
+      host: "0.0.0.0:5140"
     processors:
-      # Extract container id from Docker log file path.
-      - dissect:
-          tokenizer: "/var/lib/docker/containers/%{id}/%{_container_log_file}"
-          field: "log.file.path"
-          target_prefix: "container"
-          ignore_failure: true
-      # Enrich with container.name and other metadata using container.id.
-      - add_docker_metadata:
-          host: "unix:///var/run/docker.sock"
-          match_source: true
-          match_source_index: 4
-          match_fields: ["container.id"]
-      # Keep application/control-plane logs; drop observability noise and static frontend logs.
-      - drop_event:
-          when:
-            or:
-              - regexp:
-                  container.name: "^/?adaptive-(elasticsearch|kibana|filebeat|frontend)$"
-      # Keep raw application line in a standard searchable field.
-      - copy_fields:
-          fields:
-            - from: "json.log"
-              to: "message"
-          fail_on_error: false
-          ignore_missing: true
-      # Parse honeypot JSON logs into app.* fields for Kibana querying.
       - decode_json_fields:
-          when:
-            contains:
-              json.log: '"ts":'
-          fields: ["json.log"]
+          fields: ["message"]
+          target: "app"
+          overwrite_keys: false
+          add_error_key: true
+
+  # Backend & honeypot service logs (raw UDP, port 5141)
+  # Python SysLogHandler sends <priority>JSON — we strip the syslog
+  # priority prefix with a script processor and decode the JSON payload.
+  - type: udp
+    host: "0.0.0.0:5141"
+    processors:
+      - script:
+          lang: javascript
+          source: |
+            function process(event) {
+              var msg = event.Get("message");
+              if (msg && msg.charAt(0) === '<') {
+                var gt = msg.indexOf('>');
+                if (gt > 0) msg = msg.substring(gt + 1);
+              }
+              // strip trailing NUL byte from SysLogHandler
+              if (msg && msg.charCodeAt(msg.length - 1) === 0) {
+                msg = msg.substring(0, msg.length - 1);
+              }
+              event.Put("message", msg);
+            }
+      - decode_json_fields:
+          fields: ["message"]
           target: "app"
           overwrite_keys: false
           add_error_key: true
 
 processors:
-  - add_host_metadata:
-      netinfo.enabled: true
+  - drop_fields:
+      fields:
+        - agent
+        - host
+        - ecs
+        - syslog
+        - process
+        - hostname
+        - log
+        - input
+        - event
+        - message
+      ignore_missing: true
 
 output.elasticsearch:
   enabled: true
@@ -55,15 +59,7 @@ output.elasticsearch:
   index: "honeypot-logs-%{+yyyy.MM.dd}"
 
 setup.ilm.enabled: false
-# Keep this MVP on a custom daily target. Disabling auto template loading avoids
-# Filebeat 8 setup/data-stream races while Elasticsearch is still starting.
 setup.template.enabled: false
 
 logging.level: info
-logging.to_files: true
-logging.files:
-  path: /var/log/filebeat
-  name: filebeat
-  keepfiles: 7
-  permissions: 0644
-
+logging.to_stderr: true

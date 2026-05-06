@@ -1,5 +1,8 @@
 import json
 import logging
+import logging.handlers
+import os
+import socket
 import time
 import uuid
 from datetime import datetime, timezone
@@ -10,6 +13,8 @@ from flask import g, request
 
 SENSITIVE_KEYS = {"password", "token", "access_token", "authorization", "secret"}
 MAX_BODY_PREVIEW = 2048
+FILEBEAT_HOST = os.environ.get("FILEBEAT_HOST", "filebeat")
+FILEBEAT_SERVICE_PORT = int(os.environ.get("FILEBEAT_SERVICE_PORT", "5141"))
 
 
 def _logger() -> logging.Logger:
@@ -19,6 +24,15 @@ def _logger() -> logging.Logger:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
+        try:
+            syslog_handler = logging.handlers.SysLogHandler(
+                address=(FILEBEAT_HOST, FILEBEAT_SERVICE_PORT),
+                socktype=socket.SOCK_DGRAM,
+            )
+            syslog_handler.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(syslog_handler)
+        except Exception:
+            pass
     logger.propagate = False
     return logger
 
@@ -65,7 +79,7 @@ def install_request_logging(app) -> None:
         record = {
             "event_schema_version": "1.0",
             "event_type": "request",
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": int(datetime.now(timezone.utc).timestamp()),
             "service": app.config.get("SERVICE_NAME", "real-backend"),
             "request_id": getattr(g, "request_id", ""),
             "method": request.method,

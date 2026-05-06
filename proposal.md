@@ -273,7 +273,7 @@ Trong đó:
 - **Honeypots**: Flask (Web), Cowrie (SSH), Dionaea (FTP), Mailoney (SMTP)
 - **Control Plane API**: FastAPI
 - **Data/Logging & Aggregation**: ELK Stack (Elasticsearch, Kibana), Filebeat
-- **LLM Analyzer**: API Gemini / ChatGPT (nhận pre-aggregated data)
+- **LLM Analyzer**: Groq API — Llama 3.3 70B (nhận pre-aggregated data)
 - **RL Agent**: PyTorch
 - **Infrastructure**: Docker Compose
 

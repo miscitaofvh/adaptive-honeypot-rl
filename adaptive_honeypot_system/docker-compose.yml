@@ -41,6 +41,8 @@ services:
       - DATABASE_URL=sqlite:////data/meridian.db
       - FLASK_ENV=production
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
     volumes:
       - backend_data:/data
     networks:
@@ -69,6 +71,8 @@ services:
       - SERVICE_NAME=cmdi-honeypot
       - POT_TYPE=command-injection
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -84,6 +88,8 @@ services:
       - SERVICE_NAME=sqli-honeypot
       - POT_TYPE=sql-injection
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -99,6 +105,8 @@ services:
       - SERVICE_NAME=ssti-honeypot
       - POT_TYPE=template-injection
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -114,6 +122,8 @@ services:
       - SERVICE_NAME=ssrf-honeypot
       - POT_TYPE=server-side-request-forgery
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -168,6 +178,8 @@ services:
       - ANALYZER_APPLY_ROUTE=${ANALYZER_APPLY_ROUTE:-true}
       - ANALYZER_ENABLED=${ANALYZER_ENABLED:-true}
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
     depends_on:
       - elasticsearch
       - routing_controller
@@ -236,10 +248,10 @@ services:
     user: root
     volumes:
       - ./observability/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/log:/var/log:ro
       - filebeat_data:/usr/share/filebeat/data
+    ports:
+      - "5140:5140/udp"
+      - "5141:5141/udp"
     networks:
       - adaptive_net
     depends_on:
