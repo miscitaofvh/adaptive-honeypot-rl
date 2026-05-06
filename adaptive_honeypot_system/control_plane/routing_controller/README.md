@@ -28,8 +28,8 @@ Policy modes:
 
 State schema:
 
-- Runtime hien tai van validate `STATE_DIM = 24`.
-- Target migration: `rl_state_v2_16`, 16 floats.
+- Runtime hien tai validate `STATE_DIM = 16`.
+- State schema: `rl_state_v2_16`, 16 floats.
 - `protocol` tiep tuc la metadata cua `/decide`; controller dung `protocol` de action masking va reject non-HTTP khi L4 disabled.
 
 Luu y:

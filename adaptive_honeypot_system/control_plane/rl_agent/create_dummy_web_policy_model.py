@@ -16,7 +16,7 @@ from agent import (
 def build_dummy_web_policy_agent() -> LinearQAgent:
     """Create a deterministic model matching the proposal's web subtype order.
 
-    The state vector uses subtype indices [13:17] = [sqli, cmdi, ssti, ssrf].
+    The v2 state vector uses indices [7:11] = [sqli, cmdi, ssti, ssrf].
     This model keeps benign traffic normal and routes strong subtype evidence
     to the matching web honeypot. It is only a local demo stand-in for the
     future trained offline RL policy.
@@ -31,10 +31,10 @@ def build_dummy_web_policy_agent() -> LinearQAgent:
     model.bias[ACTION_ROUTE_SSTI] = 0.0
     model.bias[ACTION_ROUTE_SSRF] = 0.0
 
-    model.weights[ACTION_ROUTE_SQLI][13] = 5.0
-    model.weights[ACTION_ROUTE_CMDI][14] = 5.0
-    model.weights[ACTION_ROUTE_SSTI][15] = 5.0
-    model.weights[ACTION_ROUTE_SSRF][16] = 5.0
+    model.weights[ACTION_ROUTE_SQLI][7] = 5.0
+    model.weights[ACTION_ROUTE_CMDI][8] = 5.0
+    model.weights[ACTION_ROUTE_SSTI][9] = 5.0
+    model.weights[ACTION_ROUTE_SSRF][10] = 5.0
 
     return model
 

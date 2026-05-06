@@ -16,7 +16,7 @@ Trang thai sau khi pull/scan 2026-05-06:
 - Runtime Docker services khong cai PyTorch. PyTorch chi dung local cho offline training.
 - LLM analyzer da co Groq API integration, nhung fallback khi thieu API key/timeout chua chac; neu LLM khong tra output thi adaptive route co the khong dien ra.
 - RL policy that chua implement. Hien tai Web MVP van dua vao `RL_POLICY_MODE=heuristic` hoac dummy JSON model.
-- Runtime code van dung state schema v1 24D. Da chot schema v2 16D de migrate truoc khi train/evaluate RL that.
+- Runtime code da migrate sang `rl_state_v2_16` (`STATE_DIM=16`) trong analyzer, routing controller, RL agent, dummy model scripts va synthetic data generator.
 - L4 SSH/FTP/SMTP Drop-and-Catch chua implement. Controller/gateway da fail ro rang neu dung L4 placeholder.
 - Route maps duoc clear sau E2E tests de tranh stale state.
 - Da co `EXPOSURE_MODE=debug|attack`: debug giu operator endpoints/metadata; attack an service identity, route debug APIs, docs/OpenAPI, va HAProxy Stats UI. Analyzer debug endpoint `/analyze` khong con trong source hien tai.
@@ -59,9 +59,9 @@ Ket qua quan trong:
 | Gateway route updates | DONE for MVP | Idempotent map update/remove, clear all maps, `drop_connection` fail ro rang | L4 drop implementation neu chon lam Phase 8 |
 | Structured logging | DONE for MVP | JSON logs cho backend/honeypots, request/session/body preview, masking co ban | Gateway selected-backend parsing, Kibana dashboard |
 | Filebeat/ES | DONE for MVP | Docker log ingest, JSON decode, bo hardcoded container IDs, giu controller/analyzer logs | Saved searches/dashboard, retention/index template polish |
-| LLM analyzer | PARTIAL DONE | Poll ES, enrich body_preview, call Groq, validate semantic JSON, build state v1, call controller | Rule fallback khi LLM fail, schema v2 state builder, memory durable/decay, input summary hygiene |
+| LLM analyzer | PARTIAL DONE | Poll ES, enrich body_preview, call Groq or rule fallback, validate semantic JSON, build state v2, call controller | State builder package polish, memory durable/decay, input summary hygiene |
 | Dummy RL | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime | Real replay buffer, reward, train/evaluate policy |
-| RL state schema | DESIGN APPROVED | Chot `rl_state_v2_16`, protocol de ngoai tensor lam metadata/action-mask context | Migrate code/tests/artifacts/docs command examples tu 24D sang 16D |
+| RL state schema | DONE for runtime | `rl_state_v2_16`, protocol de ngoai tensor lam metadata/action-mask context, code runtime da dung 16D | Unit tests/schema package polish, replay artifacts moi |
 | L4 Drop-and-Catch | NOT STARTED | Disabled safely | SSH/FTP/SMTP data plane, honeypots, reconnect tests |
 | Benchmark/research metrics | NOT STARTED | E2E smoke tests only | RQ metrics, attack drivers, adaptive vs static/rule comparison |
 | Docs | PARTIAL DONE | README/Progress/component READMEs updated | Benchmark docs, design notes, final report alignment |
@@ -78,7 +78,7 @@ Done:
   - Builds session context from gateway logs and enriches request body from backend/honeypot service logs.
   - Calls Groq (`GROQ_API_KEY`, default model `llama-3.3-70b-versatile`) for semantic extraction.
   - Validates/clamps LLM output fields.
-  - Builds current runtime state v1 24D and calls routing controller `/decide`.
+  - Builds current runtime state v2 16D and calls routing controller `/decide`.
   - `EXPOSURE_MODE=attack` hides docs/OpenAPI and detailed health stats.
 
 - `adaptive_honeypot_system/control_plane/llm_analyzer/test_adaptive_web_flow.sh`
@@ -313,7 +313,7 @@ Status: PARTIAL DONE.
 
 Done:
 
-- [x] Analyzer builds runtime state v1 24D.
+- [x] Analyzer builds runtime state v2 16D.
 - [x] Groq-backed semantic extraction exists.
 - [x] LLM output validation/clamping exists.
 - [x] Analyzer can read logs from Elasticsearch and call `/decide`.
@@ -324,14 +324,14 @@ Not done:
 - [ ] Dedicated `state_builder/` package.
 - [ ] `StateVector` dataclass with named fields and schema version.
 - [ ] Unit tests for state dimension/order.
-- [ ] Runtime migration from `STATE_DIM=24` to `STATE_DIM=16`.
+- [x] Runtime migration from `STATE_DIM=24` to `STATE_DIM=16`.
 - [ ] Rule-based fallback that still routes Web attacks when LLM provider is unavailable.
 - [ ] Real session memory.
 - [ ] Redis service or durable memory.
 - [ ] Strict LLM output schema.
 - [ ] Failure/timeout policy around real LLM calls.
 
-State schema to migrate to: `rl_state_v2_16`
+Runtime state schema: `rl_state_v2_16`
 
 Protocol is required metadata of `/decide`, not a tensor field. Controller uses it for action masking and protocol-specific normalization.
 
@@ -366,12 +366,12 @@ Status: DONE for single-attack Web MVP, incomplete for research benchmark.
 
 - [x] Worker service exists in analyzer.
 - [x] Polls Elasticsearch.
-- [x] Builds state v1 24D.
+- [x] Builds state v2 16D.
 - [x] Calls routing controller.
 - [x] Applies HAProxy session route.
 - [x] `make test-adaptive-web` proves SQLi single-attack route.
 - [x] Route cleanup keeps maps clean after tests.
-- [ ] Migrate adaptive flow to `rl_state_v2_16`.
+- [x] Migrate adaptive flow to `rl_state_v2_16`.
 - [ ] Multi-attack same session route-shift demo.
 - [ ] Benign-session no-reroute benchmark.
 - [ ] Dry-run report/replay mode.
@@ -512,9 +512,9 @@ Acceptance:
 - `make validate` van PASS.
 - Invalid backend/L4 disabled behavior duoc test tu dong.
 
-### Step B - Migrate to `rl_state_v2_16` and extract formal state builder
+### Step B - Harden `rl_state_v2_16` state builder
 
-Goal: giam state tu 24D xuong 16D, tach state logic khoi analyzer, va khoa schema de train/evaluate RL khong bi lech field order.
+Goal: state da duoc giam tu 24D xuong 16D; buoc tiep theo la tach het logic state ra package rieng de train/evaluate RL khong bi lech field order.
 
 Files to create:
 
@@ -525,24 +525,24 @@ Files to create:
 
 Tasks:
 
-- [ ] Define `STATE_SCHEMA_VERSION = "rl_state_v2_16"`.
-- [ ] Change `STATE_DIM` from 24 to 16.
-- [ ] Define field names/ranges for 16D state.
-- [ ] Define `StateVector` dataclass.
-- [ ] Implement `to_list()` and `validate_state()`.
+- [x] Define `STATE_SCHEMA_VERSION = "rl_state_v2_16"`.
+- [x] Change `STATE_DIM` from 24 to 16.
+- [x] Define field names/ranges for 16D state.
+- [x] Define `StateVector` dataclass.
+- [x] Implement `to_list()` and `validate_state()`.
+- [x] Analyzer imports state builder for schema and `StateVector`.
 - [ ] Move feature computation from analyzer to `features.py`.
-- [ ] Analyzer imports state builder instead of owning state construction.
-- [ ] Controller `/decide` accepts optional/required `state_schema` and validates it.
-- [ ] Heuristic policy indexes update:
+- [x] Controller `/decide` accepts `state_schema` and validates it.
+- [x] Heuristic policy indexes update:
   - SQLi score index 7.
   - CMDi score index 8.
   - SSTI score index 9.
   - SSRF score index 10.
   - credential/enumeration reserved for future L4.
-- [ ] Dummy model generators update to 16D.
-- [ ] Synthetic dataset generator update to 16D.
-- [ ] Test scripts and docs command examples update to 16D payloads.
-- [ ] Keep `protocol` as `/decide` metadata and action-mask context, not state tensor.
+- [x] Dummy model generators update to 16D.
+- [x] Synthetic dataset generator update to 16D.
+- [x] Test scripts and docs command examples update to 16D payloads.
+- [x] Keep `protocol` as `/decide` metadata and action-mask context, not state tensor.
 
 Acceptance:
 
@@ -671,10 +671,10 @@ Tasks:
   - llm_confidence
   - updated_memory_context
 - [ ] Add timeout and retry.
-- [ ] On LLM failure:
-  - use rule-based state builder.
-  - preserve memory with decay.
+- [x] On LLM failure or missing Groq package/key:
+  - use rule-based semantic fallback.
   - do not block request path.
+- [ ] Add memory decay for fallback/LLM memory.
 - [ ] Add Redis or in-process memory:
   - per HTTP session ID.
   - source IP fallback.
@@ -824,7 +824,7 @@ Future work:
 
 Current mitigation:
 
-- Docs distinguish current runtime v1 24D from approved v2 16D migration target.
+- Docs distinguish current runtime v2 16D from removed v1 24D schema.
 - Docs call RL policy heuristic/dummy until replay training/evaluation exists.
 - L4 disabled explicitly.
 

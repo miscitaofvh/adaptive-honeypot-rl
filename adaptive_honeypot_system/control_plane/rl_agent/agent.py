@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import json
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-STATE_DIM = 24
+CONTROL_PLANE_DIR = Path(__file__).resolve().parents[1]
+
+if str(CONTROL_PLANE_DIR) not in sys.path:
+    sys.path.insert(0, str(CONTROL_PLANE_DIR))
+
+from state_builder import STATE_DIM, STATE_SCHEMA_VERSION, validate_state  # noqa: E402
+
 PROTOCOLS = ("http", "ssh", "ftp", "smtp")
 
 ACTION_KEEP_NORMAL = 0
@@ -70,11 +77,10 @@ def clip(value: float, lower: float, upper: float) -> float:
 
 
 def protocol_from_state(state: Sequence[float]) -> str:
-    if len(state) < 4:
-        return "http"
-    first = list(state[:4])
-    best_idx = max(range(4), key=lambda idx: first[idx])
-    return PROTOCOLS[best_idx]
+    # State schema v2 intentionally keeps protocol out of the tensor.
+    # Callers should pass transition.protocol; this fallback preserves older
+    # datasets without protocol metadata as HTTP.
+    return "http"
 
 
 def allowed_action_indices(protocol: str) -> List[int]:
@@ -161,8 +167,7 @@ class LinearQAgent:
         if transition.done:
             target_q = transition.reward
         else:
-            next_protocol = protocol_from_state(next_state)
-            next_allowed = allowed_action_indices(next_protocol)
+            next_allowed = allowed_action_indices(transition.protocol)
             q_next = self.q_values(next_state)
             max_next = max(q_next[idx] for idx in next_allowed)
             target_q = transition.reward + gamma * max_next
@@ -205,6 +210,7 @@ class LinearQAgent:
 
     def to_dict(self) -> Dict[str, object]:
         return {
+            "state_schema": STATE_SCHEMA_VERSION,
             "state_dim": self.state_dim,
             "actions": self.action_space,
             "weights": self.weights,
@@ -235,8 +241,8 @@ class LinearQAgent:
 
 
 def parse_transition(raw: Dict[str, object]) -> Transition:
-    state = [float(v) for v in raw["state"]]
-    next_state = [float(v) for v in raw["next_state"]]
+    state = validate_state(raw["state"])
+    next_state = validate_state(raw["next_state"])
 
     protocol = str(raw.get("protocol") or protocol_from_state(state)).lower()
     optimal_action = raw.get("optimal_action")

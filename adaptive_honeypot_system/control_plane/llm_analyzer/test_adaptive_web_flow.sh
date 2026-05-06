@@ -41,7 +41,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/5] Start Web MVP stack in normal-first mode with dummy heuristic RL..."
+echo "[1/5] Start Web MVP stack in normal-first mode with heuristic RL..."
 TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true docker compose up -d --build --force-recreate \
   elasticsearch \
   backend \
@@ -54,10 +54,10 @@ TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLE
   gateway \
   filebeat >/dev/null
 
-echo "[2/5] Wait for gateway, routing controller, dummy analyzer, and Elasticsearch..."
+echo "[2/5] Wait for gateway, routing controller, analyzer, and Elasticsearch..."
 wait_for_url "$GATEWAY_URL/api/health" "gateway"
 wait_for_url "$CONTROLLER_URL/health" "routing controller"
-wait_for_url "$ANALYZER_URL/health" "dummy analyzer"
+wait_for_url "$ANALYZER_URL/health" "analyzer"
 wait_for_url "$ES_URL" "elasticsearch" 120
 cleanup
 
@@ -104,4 +104,4 @@ if [[ "$STATUS" != "500" ]] || ! echo "$BODY" | grep -q "DatabaseError"; then
   exit 1
 fi
 
-echo "PASS: log -> dummy analyzer -> dummy RL/controller -> HAProxy session route -> SQLi honeypot flow works."
+echo "PASS: log -> analyzer -> heuristic RL/controller -> HAProxy session route -> SQLi honeypot flow works."

@@ -14,11 +14,11 @@ from agent import (
     ACTIONS,
     ACTION_KEEP_NORMAL,
     STATE_DIM,
+    STATE_SCHEMA_VERSION,
     Transition,
     allowed_action_indices,
     action_name,
     load_transitions,
-    protocol_from_state,
 )
 
 
@@ -60,8 +60,7 @@ def build_current_action_mask(transitions: Sequence[Transition]) -> torch.Tensor
 def build_next_action_mask(transitions: Sequence[Transition]) -> torch.Tensor:
     mask = torch.zeros((len(transitions), len(ACTIONS)), dtype=torch.bool)
     for idx, transition in enumerate(transitions):
-        next_protocol = protocol_from_state(transition.next_state)
-        for action_idx in allowed_action_indices(next_protocol):
+        for action_idx in allowed_action_indices(transition.protocol):
             mask[idx, action_idx] = True
     return mask
 
@@ -163,13 +162,14 @@ def export_model_json(model: nn.Linear, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
         payload = {
+            "state_schema": STATE_SCHEMA_VERSION,
             "state_dim": STATE_DIM,
             "actions": ACTIONS,
             "weights": model.weight.detach().cpu().tolist(),
             "bias": model.bias.detach().cpu().tolist(),
             "metadata": {
                 "trained_with": "pytorch",
-                "model": "nn.Linear(24, 8)",
+                "model": f"nn.Linear({STATE_DIM}, {len(ACTIONS)})",
             },
         }
     with output_path.open("w", encoding="utf-8") as f:

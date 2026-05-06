@@ -140,33 +140,23 @@ def reward_for_action(action: int, optimal: int, attack: str, current_route: int
     return round(reward, 4)
 
 
-def attack_category_and_subtype(protocol: str, attack: str) -> Tuple[List[float], List[float]]:
-    category = [0.0, 0.0, 0.0, 0.0]  # injection, bruteforce, enumeration, malformed
-    subtype = [0.0, 0.0, 0.0, 0.0]  # sqli, cmdi, ssti, ssrf
-
+def target_scores(protocol: str, attack: str) -> List[float]:
+    """Return v2 target scores:
+    [sqli, cmdi, ssti, ssrf, credential_attack, enumeration].
+    """
+    scores = [0.0 for _ in range(6)]
     if protocol == "http":
-        if attack in {"sqli", "cmdi", "ssti", "ssrf"}:
-            category[0] = 1.0
-        elif attack == "malformed":
-            category[3] = 1.0
-
-        if attack == "sqli":
-            subtype = [0.92, 0.03, 0.03, 0.02]
-        elif attack == "cmdi":
-            subtype = [0.03, 0.92, 0.03, 0.02]
-        elif attack == "ssti":
-            subtype = [0.03, 0.02, 0.93, 0.02]
-        elif attack == "ssrf":
-            subtype = [0.02, 0.02, 0.02, 0.94]
-        else:
-            subtype = [0.05, 0.05, 0.05, 0.05]
-    else:
-        if attack == "bruteforce":
-            category[1] = 1.0
-        elif attack == "enumeration":
-            category[2] = 1.0
-
-    return category, subtype
+        mapping = {"sqli": 0, "cmdi": 1, "ssti": 2, "ssrf": 3}
+        if attack in mapping:
+            scores[mapping[attack]] = 0.94
+            for idx in range(4):
+                if idx != mapping[attack]:
+                    scores[idx] = 0.02
+    elif attack == "bruteforce":
+        scores[4] = 0.92
+    elif attack == "enumeration":
+        scores[5] = 0.90
+    return scores
 
 
 def make_state(
@@ -178,10 +168,6 @@ def make_state(
     current_route: int,
     previous_attack: str | None,
 ) -> List[float]:
-    protocol_onehot = [0.0, 0.0, 0.0, 0.0]
-    protocol_index = {"http": 0, "ssh": 1, "ftp": 2, "smtp": 3}[protocol]
-    protocol_onehot[protocol_index] = 1.0
-
     malicious = attack != "benign"
 
     session_age_norm = clip01(step / max(1.0, float(total_steps - 1)))
@@ -194,23 +180,22 @@ def make_state(
     if malicious:
         failed_attempts_norm += rng.uniform(0.40, 0.75)
 
-    content_size_anomaly = rng.uniform(0.04, 0.25)
+    payload_complexity_norm = rng.uniform(0.04, 0.25)
     if attack in {"sqli", "cmdi", "ssti", "ssrf", "malformed"}:
-        content_size_anomaly += rng.uniform(0.30, 0.62)
+        payload_complexity_norm += rng.uniform(0.30, 0.62)
+    if attack == "bruteforce":
+        payload_complexity_norm += rng.uniform(0.08, 0.20)
 
-    probe_diversity_norm = rng.uniform(0.10, 0.35)
+    target_diversity_norm = rng.uniform(0.10, 0.35)
     if attack == "enumeration":
-        probe_diversity_norm += rng.uniform(0.35, 0.52)
-
-    category, subtype = attack_category_and_subtype(protocol, attack)
+        target_diversity_norm += rng.uniform(0.35, 0.52)
 
     llm_confidence = rng.uniform(0.55, 0.84)
     if malicious:
         llm_confidence += rng.uniform(0.08, 0.14)
     llm_confidence = clip01(llm_confidence)
 
-    effective_category = [clip01(v * llm_confidence) for v in category]
-    effective_subtype = [clip01(v * llm_confidence) for v in subtype]
+    effective_targets = [clip01(v * llm_confidence) for v in target_scores(protocol, attack)]
 
     evasion_score = rng.uniform(0.05, 0.22)
     if malicious:
@@ -228,32 +213,27 @@ def make_state(
         historical_intent_consistency += rng.uniform(0.14, 0.26)
 
     attack_progression_stage = clip01(0.18 + session_age_norm * 0.66 + rng.uniform(-0.06, 0.10))
-    memory_decay_weight = clip01(1.0 - 0.03 * step + rng.uniform(-0.04, 0.03))
     intent_shift_velocity = clip01(attack_vector_shift * rng.uniform(0.35, 0.90))
-
-    state = (
-        protocol_onehot
-        + [
-            clip01(interaction_rate_norm),
-            clip01(failed_attempts_norm),
-            clip01(content_size_anomaly),
-            clip01(probe_diversity_norm),
-        ]
-        + effective_category
-        + effective_subtype
-        + [
-            effective_evasion,
-            float(current_route),
-            clip01(attack_vector_shift),
-            clip01(historical_intent_consistency),
-            attack_progression_stage,
-            memory_decay_weight,
-            intent_shift_velocity,
-        ]
+    intent_stability_score = clip01(
+        historical_intent_consistency * (1.0 - intent_shift_velocity) * llm_confidence
     )
+    engagement_depth_norm = 0.0
+    if current_route:
+        engagement_depth_norm = clip01(0.20 + session_age_norm * 0.55 + rng.uniform(0.0, 0.20))
 
-    # Insert session_age_norm at index 4 according to the intended 24D schema.
-    state.insert(4, session_age_norm)
+    state = [
+        session_age_norm,
+        clip01(interaction_rate_norm),
+        clip01(failed_attempts_norm),
+        clip01(payload_complexity_norm),
+        clip01(target_diversity_norm),
+        float(current_route),
+        engagement_depth_norm,
+        *effective_targets,
+        effective_evasion,
+        clip01(attack_progression_stage * llm_confidence),
+        intent_stability_score,
+    ]
 
     if len(state) != STATE_DIM:
         raise ValueError(f"Expected state dim {STATE_DIM}, got {len(state)}")

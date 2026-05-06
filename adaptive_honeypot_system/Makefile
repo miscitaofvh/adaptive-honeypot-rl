@@ -337,6 +337,8 @@ validate:
 		honeypots/sqli_pot/app.py \
 		honeypots/ssti_pot/app.py \
 		honeypots/ssrf_pot/app.py \
+		control_plane/state_builder/__init__.py \
+		control_plane/state_builder/state_schema.py \
 		control_plane/rl_agent/agent.py \
 		control_plane/rl_agent/generate_fake_data.py \
 		control_plane/rl_agent/train_offline.py \

@@ -4,16 +4,29 @@ import json
 import logging
 import math
 import os
+import re
+import sys
 import threading
 import time
 from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 import requests
 from fastapi import FastAPI, HTTPException
-from groq import Groq
 from pydantic import BaseModel, Field
+
+try:
+    from groq import Groq
+except ImportError:  # pragma: no cover - local fallback when optional provider is absent
+    Groq = None  # type: ignore[assignment]
+
+CONTROL_PLANE_DIR = Path(__file__).resolve().parents[1]
+if str(CONTROL_PLANE_DIR) not in sys.path:
+    sys.path.insert(0, str(CONTROL_PLANE_DIR))
+
+from state_builder import STATE_DIM, STATE_SCHEMA_VERSION, StateVector  # noqa: E402
 
 
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +43,8 @@ ANALYZER_ENABLED = os.getenv("ANALYZER_ENABLED", "true").strip().lower() in {"1"
 EXPOSURE_MODE = os.getenv("EXPOSURE_MODE", "debug").strip().lower()
 DEBUG_EXPOSURE = EXPOSURE_MODE in {"debug", "dev", "development", "operator", "test"}
 ROUTE_COOLDOWN_SECONDS = float(os.getenv("ROUTE_COOLDOWN_SECONDS", "5"))
+ANALYZER_ROUTE_THRESHOLD = float(os.getenv("ANALYZER_ROUTE_THRESHOLD", "0.45"))
+SERVICE_BODY_CACHE_SECONDS = float(os.getenv("SERVICE_BODY_CACHE_SECONDS", "120"))
 ANALYZER_STARTED_AT = datetime.now(timezone.utc)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -37,8 +52,10 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "15"))
 
 _groq_client: Optional[Groq] = None
-if GROQ_API_KEY:
+if GROQ_API_KEY and Groq is not None:
     _groq_client = Groq(api_key=GROQ_API_KEY)
+elif GROQ_API_KEY and Groq is None:
+    logger.warning("groq package not installed — LLM calls will use rule fallback")
 else:
     logger.warning("GROQ_API_KEY not set — LLM calls will be skipped (graceful degradation)")
 
@@ -79,10 +96,14 @@ _session_memory: dict[str, str] = {}
 _session_first_seen: dict[str, float] = {}
 # session_id → (backend, timestamp) for cooldown dedup
 _last_route_by_session: dict[str, tuple[str, float]] = {}
+_session_last_attack: dict[str, str] = {}
 
 seen_event_ids: OrderedDict[str, float] = OrderedDict()
 # session_id → list of clean event dicts accumulated since last analysis cycle
 _pending_events: dict[str, list[dict]] = defaultdict(list)
+# (session_id, method, path) → (body_preview, timestamp), used when Filebeat
+# ingests service logs and gateway logs in different polling windows.
+_recent_service_bodies: dict[tuple[str, str, str], tuple[str, float]] = {}
 
 stats: dict[str, Any] = {
     "decisions": 0,
@@ -98,6 +119,8 @@ stats: dict[str, Any] = {
 
 class AnalyzerStats(BaseModel):
     enabled: bool
+    state_schema: str
+    state_dim: int
     elasticsearch_url: str
     routing_controller_url: str
     seen_events: int
@@ -147,6 +170,99 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _events_text(events: list[dict]) -> str:
+    parts: list[str] = []
+    for event in events:
+        for key in ("method", "path", "query", "request_body", "user_agent", "referer", "content_type"):
+            value = event.get(key)
+            if value is not None:
+                parts.append(str(value))
+    return "\n".join(parts).lower()
+
+
+def _score_patterns(text: str, patterns: tuple[str, ...]) -> float:
+    hits = sum(1 for pattern in patterns if re.search(pattern, text, re.IGNORECASE))
+    if hits == 0:
+        return 0.0
+    return min(0.95, 0.55 + hits * 0.15)
+
+
+def rule_based_semantic_fallback(session_id: str, events: list[dict]) -> dict[str, Any]:
+    """Produce LLM-shaped semantic output when the provider is unavailable."""
+    text = _events_text(events)
+    sqli = _score_patterns(text, (
+        r"\bunion\b\s+\bselect\b",
+        r"\bselect\b.+\bfrom\b",
+        r"\bor\b\s+1\s*=\s*1",
+        r"--|#|/\*|\*/",
+        r"\binformation_schema\b|\bdrop\b|\binsert\b|\bupdate\b",
+    ))
+    cmdi = _score_patterns(text, (
+        r";|\||&&|`|\$\(",
+        r"\bwhoami\b|\bid\b|\buname\b|\bcat\b|\bls\b|\bcurl\b|\bwget\b",
+        r"/etc/passwd|/etc/shadow|cmd\.exe|powershell",
+    ))
+    ssti = _score_patterns(text, (
+        r"\{\{|\}\}|\{%|%\}",
+        r"__class__|__mro__|__subclasses__|config|jinja",
+        r"\{\{\s*\d+\s*[*+\-/]\s*\d+\s*\}\}",
+    ))
+    ssrf = _score_patterns(text, (
+        r"169\.254\.169\.254|metadata\.google|metadata\.aws",
+        r"localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]",
+        r"file://|gopher://|dict://|ftp://",
+        r"/latest/meta-data|internal|admin",
+    ))
+
+    scores = [sqli, cmdi, ssti, ssrf]
+    best_score = max(scores)
+    previous_attack = _session_last_attack.get(session_id)
+    subtypes = ["sqli", "cmdi", "ssti", "ssrf"]
+    best_attack = subtypes[scores.index(best_score)] if best_score > 0 else "benign"
+
+    encoded_or_obfuscated = _score_patterns(text, (
+        r"%[0-9a-f]{2}",
+        r"\\x[0-9a-f]{2}",
+        r"base64|fromcharcode|char\(",
+        r"\.\./|\.\.\\",
+    ))
+    request_count = max(1, len(events))
+    failed_count = sum(1 for event in events if (event.get("status") or 0) >= 400)
+    failed_ratio = failed_count / request_count
+
+    attack_category = "benign"
+    if best_score >= 0.45:
+        attack_category = "injection"
+    elif failed_ratio >= 0.5:
+        attack_category = "enumeration"
+
+    historical_consistency = 0.5
+    intent_shift_velocity = 0.0
+    if previous_attack:
+        historical_consistency = 0.85 if previous_attack == best_attack else 0.25
+        intent_shift_velocity = 0.0 if previous_attack == best_attack else 0.75
+
+    if best_attack != "benign":
+        _session_last_attack[session_id] = best_attack
+
+    confidence = 0.78 if best_score >= 0.45 else 0.35
+    memory = "No clear attack detected."
+    if best_score >= 0.45:
+        memory = f"Rule fallback detected {best_attack} indicators in recent HTTP session."
+
+    return {
+        "attack_category": attack_category,
+        "web_subtype_scores": scores,
+        "evasion_score": max(encoded_or_obfuscated, min(1.0, failed_ratio * 0.5)),
+        "historical_intent_consistency": historical_consistency,
+        "attack_progression_stage": 0.45 if best_score >= 0.45 else 0.1,
+        "intent_shift_velocity": intent_shift_velocity,
+        "llm_confidence": confidence,
+        "updated_memory_context": memory,
+        "_source": "rule_fallback",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -284,9 +400,8 @@ def build_session_context(session_id: str, events: list[dict]) -> dict[str, Any]
 
 def compute_rule_features(session_id: str, events: list[dict]) -> dict[str, float]:
     """
-    Compute the non-LLM dimensions of the 24D state vector from raw event data.
-    Returns a dict of named scalars; the state builder in apply_decision() will
-    combine these with LLM output.
+    Compute non-LLM dimensions for the v2 16D state from raw event data.
+    Returns named scalars that are combined with LLM or rule-fallback output.
     """
     if not events:
         return {}
@@ -306,7 +421,7 @@ def compute_rule_features(session_id: str, events: list[dict]) -> dict[str, floa
     failed_count = sum(1 for e in events if (e.get("status") or 0) >= 400)
     failed_attempts_norm = failed_count / request_count if request_count else 0.0
 
-    # content_size_anomaly — z-score of bytes_in vs rolling mean/stddev
+    # payload_complexity_norm — size anomaly plus obvious payload complexity
     sizes = [e["bytes_in"] for e in events if e.get("bytes_in")]
     if len(sizes) >= 2:
         mean = sum(sizes) / len(sizes)
@@ -314,16 +429,31 @@ def compute_rule_features(session_id: str, events: list[dict]) -> dict[str, floa
         stddev = math.sqrt(variance) if variance > 0 else 1.0
         # Use largest deviation as the anomaly signal, clipped to [0,1]
         max_z = max(abs(s - mean) / stddev for s in sizes)
-        content_size_anomaly = min(1.0, max_z / 3.0)  # z=3 → full anomaly
+        size_signal = min(1.0, max_z / 3.0)  # z=3 -> full anomaly
     elif sizes:
         # Single request: anomaly based on absolute size vs 512 byte baseline
-        content_size_anomaly = min(1.0, sizes[0] / 2048.0)
+        size_signal = min(1.0, sizes[0] / 2048.0)
     else:
-        content_size_anomaly = 0.0
+        size_signal = 0.0
 
-    # probe_diversity_norm — unique paths / total requests
+    text = _events_text(events)
+    dangerous_matches = sum(
+        1
+        for pattern in (
+            r"\bunion\b",
+            r"\bselect\b",
+            r";|\||&&|`|\$\(",
+            r"\{\{|\{%|__class__|__mro__",
+            r"169\.254\.169\.254|localhost|127\.0\.0\.1|file://",
+            r"%27|%22|%7b|%7d|%2f|\\x[0-9a-f]{2}",
+        )
+        if re.search(pattern, text, re.IGNORECASE)
+    )
+    payload_complexity_norm = max(size_signal, min(1.0, dangerous_matches / 3.0))
+
+    # target_diversity_norm — unique paths / total requests
     unique_paths = len(set(e["path"] for e in events if e.get("path")))
-    probe_diversity_norm = unique_paths / request_count if request_count else 0.0
+    target_diversity_norm = unique_paths / request_count if request_count else 0.0
 
     # current_route — 0: normal, 1: honeypot
     last_backend = None
@@ -332,14 +462,18 @@ def compute_rule_features(session_id: str, events: list[dict]) -> dict[str, floa
             last_backend = e["backend"]
             break
     current_route = 0.0 if (last_backend is None or last_backend == "normal_api") else 1.0
+    engagement_depth_norm = 0.0
+    if current_route:
+        engagement_depth_norm = min(1.0, (request_count / 10.0) + min(0.3, session_age_norm * 0.3))
 
     return {
         "session_age_norm": round(session_age_norm, 4),
         "interaction_rate_norm": round(interaction_rate_norm, 4),
         "failed_attempts_norm": round(failed_attempts_norm, 4),
-        "content_size_anomaly": round(content_size_anomaly, 4),
-        "probe_diversity_norm": round(probe_diversity_norm, 4),
+        "payload_complexity_norm": round(payload_complexity_norm, 4),
+        "target_diversity_norm": round(target_diversity_norm, 4),
         "current_route": current_route,
+        "engagement_depth_norm": round(engagement_depth_norm, 4),
     }
 
 
@@ -425,7 +559,9 @@ def call_llm(context: dict[str, Any]) -> Optional[dict[str, Any]]:
         "event_type": "llm_input_preview",
         "service": "llm-analyzer",
         "session_id": context.get("session_id"),
-        "payload": context,
+        "event_count": len(context.get("events") or []),
+        "unique_paths": context.get("unique_paths") or [],
+        "has_memory": bool(context.get("memory")),
     }, ensure_ascii=True))
 
     if _groq_client is None:
@@ -495,35 +631,55 @@ def should_skip_cooldown(session_id: str, backend: str) -> bool:
     return False
 
 
+def remember_service_body(session_id: str, method: str, path: str, body: str) -> None:
+    if not session_id or not method or not path or not body:
+        return
+    now = time.time()
+    _recent_service_bodies[(session_id, method, path)] = (body[:2048], now)
+    expired = [
+        key
+        for key, (_, ts) in _recent_service_bodies.items()
+        if now - ts > SERVICE_BODY_CACHE_SECONDS
+    ]
+    for key in expired:
+        _recent_service_bodies.pop(key, None)
+
+
+def get_recent_service_body(session_id: str, method: str, path: str) -> Optional[str]:
+    entry = _recent_service_bodies.get((session_id, method, path))
+    if not entry:
+        return None
+    body, ts = entry
+    if time.time() - ts > SERVICE_BODY_CACHE_SECONDS:
+        _recent_service_bodies.pop((session_id, method, path), None)
+        return None
+    return body
+
+
 def build_state_vector(rule_features: dict[str, float], llm_output: Optional[dict]) -> list[float]:
     """
-    Assemble the full 24D state tensor from rule-based features + LLM output.
-    When llm_output is None (stub/error), LLM dimensions collapse toward 0
-    via llm_confidence=0, forcing the RL agent to rely on rule-based signals.
+    Assemble the v2 16D state tensor from rule-based features + semantic output.
+    `protocol` is intentionally metadata for /decide and is not part of this
+    tensor.
     """
-    # --- Protocol (4D) — always HTTP in this milestone ---
-    protocol_onehot = [1.0, 0.0, 0.0, 0.0]
-
     # --- Rule-based scalars ---
     session_age_norm      = rule_features.get("session_age_norm", 0.0)
     interaction_rate_norm = rule_features.get("interaction_rate_norm", 0.0)
     failed_attempts_norm  = rule_features.get("failed_attempts_norm", 0.0)
-    content_size_anomaly  = rule_features.get("content_size_anomaly", 0.0)
-    probe_diversity_norm  = rule_features.get("probe_diversity_norm", 0.0)
+    payload_complexity    = rule_features.get("payload_complexity_norm", 0.0)
+    target_diversity      = rule_features.get("target_diversity_norm", 0.0)
     current_route         = rule_features.get("current_route", 0.0)
+    engagement_depth      = rule_features.get("engagement_depth_norm", 0.0)
 
     # --- LLM semantic features ---
     if llm_output:
-        cat_map = {"injection": 0, "bruteforce": 1, "enumeration": 2, "malformed": 3}
-        cat_idx = cat_map.get(str(llm_output.get("attack_category", "")).lower(), 0)
-        attack_category_onehot = [1.0 if i == cat_idx else 0.0 for i in range(4)]
-
         web_subtype_scores          = list(llm_output.get("web_subtype_scores", [0.0, 0.0, 0.0, 0.0]))[:4]
         evasion_score               = float(llm_output.get("evasion_score", 0.0))
         llm_confidence              = float(llm_output.get("llm_confidence", 0.0))
         historical_intent_consistency = float(llm_output.get("historical_intent_consistency", 0.0))
         attack_progression_stage    = float(llm_output.get("attack_progression_stage", 0.0))
         intent_shift_velocity       = float(llm_output.get("intent_shift_velocity", 0.0))
+        attack_category             = str(llm_output.get("attack_category", "benign")).lower()
 
         # Update memory for next window
         session_id = rule_features.get("_session_id", "")
@@ -531,47 +687,48 @@ def build_state_vector(rule_features: dict[str, float], llm_output: Optional[dic
         if session_id and new_memory:
             _session_memory[session_id] = str(new_memory)
     else:
-        attack_category_onehot        = [0.0, 0.0, 0.0, 0.0]
         web_subtype_scores            = [0.0, 0.0, 0.0, 0.0]
         evasion_score                 = 0.0
         llm_confidence                = 0.0
         historical_intent_consistency = 0.0
         attack_progression_stage      = 0.0
         intent_shift_velocity         = 0.0
+        attack_category               = "benign"
 
     # --- Graceful degradation: scale LLM features by confidence ---
-    c = llm_confidence
-    effective_category  = [v * c for v in attack_category_onehot]
-    effective_subtype   = [v * c for v in web_subtype_scores]
-    effective_evasion   = evasion_score * c
-    effective_hist      = historical_intent_consistency * c
-    effective_prog      = attack_progression_stage * c
-    effective_shift_vel = intent_shift_velocity * c
+    c = _clamp(llm_confidence)
+    target_scores = [_clamp(value) * c for value in web_subtype_scores[:4]]
+    while len(target_scores) < 4:
+        target_scores.append(0.0)
 
-    # attack_vector_shift — placeholder 0 (would need previous-window state to compute)
-    attack_vector_shift = 0.0
+    credential_score = 0.0
+    enumeration_score = 0.0
+    if attack_category == "bruteforce":
+        credential_score = c
+    elif attack_category == "enumeration":
+        enumeration_score = c
 
-    # memory_decay_weight — always 1.0 (in-memory store, no time decay yet)
-    memory_decay_weight = 1.0 * c if llm_output else 0.0
+    intent_stability = historical_intent_consistency * (1.0 - intent_shift_velocity) * c
 
-    state = [
-        *protocol_onehot,           # 4
-        session_age_norm,           # 1
-        interaction_rate_norm,      # 1
-        failed_attempts_norm,       # 1
-        content_size_anomaly,       # 1
-        probe_diversity_norm,       # 1
-        *effective_category,        # 4
-        *effective_subtype,         # 4
-        effective_evasion,          # 1
-        current_route,              # 1
-        attack_vector_shift,        # 1
-        effective_hist,             # 1
-        effective_prog,             # 1
-        memory_decay_weight,        # 1
-        effective_shift_vel,        # 1
-    ]
-    assert len(state) == 24, f"state dim mismatch: {len(state)}"
+    state = StateVector(
+        session_age_norm=session_age_norm,
+        interaction_rate_norm=interaction_rate_norm,
+        failed_attempts_norm=failed_attempts_norm,
+        payload_complexity_norm=payload_complexity,
+        target_diversity_norm=target_diversity,
+        current_route=current_route,
+        engagement_depth_norm=engagement_depth,
+        target_sqli_score=target_scores[0],
+        target_cmdi_score=target_scores[1],
+        target_ssti_score=target_scores[2],
+        target_ssrf_score=target_scores[3],
+        target_credential_attack_score=credential_score,
+        target_enumeration_score=enumeration_score,
+        evasion_score=evasion_score * c,
+        attack_progression_stage=attack_progression_stage * c,
+        intent_stability_score=intent_stability,
+    ).to_list()
+    assert len(state) == STATE_DIM, f"state dim mismatch: {len(state)}"
     return state
 
 
@@ -583,9 +740,9 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     """
     Full pipeline for a single session window:
     1. Build session context (the LLM input JSON)
-    2. Call LLM (stub for now)
+    2. Call LLM, falling back to rules when provider unavailable
     3. Compute rule-based features
-    4. Build 24D state vector
+    4. Build v2 16D state vector
     5. Call routing controller
     """
     if not events:
@@ -596,25 +753,28 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     rule_features["_session_id"] = session_id
 
     llm_output = call_llm(context)
-
+    semantic_source = "llm"
     if llm_output is None:
-        return {
-            "routed": False,
-            "reason": "llm_no_output",
-            "session_id": session_id,
-            "rule_features": rule_features,
-            "context_event_count": len(events),
-        }
+        llm_output = rule_based_semantic_fallback(session_id, events)
+        semantic_source = "rule_fallback"
 
-    # Determine target backend from LLM subtype scores
-    subtype_scores = llm_output.get("web_subtype_scores", [0, 0, 0, 0])
+    state = build_state_vector(rule_features, llm_output)
+
+    # Determine target backend from v2 target scores after confidence scaling.
+    subtype_scores = state[7:11]
     subtypes = ["sqli", "cmdi", "ssti", "ssrf"]
     best_idx = max(range(4), key=lambda i: subtype_scores[i])
     best_score = subtype_scores[best_idx]
-    attack_type = subtypes[best_idx] if best_score >= 0.45 else None
+    attack_type = subtypes[best_idx] if best_score >= ANALYZER_ROUTE_THRESHOLD else None
 
     if not attack_type:
-        return {"routed": False, "reason": "llm_confidence_too_low", "session_id": session_id}
+        return {
+            "routed": False,
+            "reason": "target_score_too_low",
+            "session_id": session_id,
+            "semantic_source": semantic_source,
+            "best_score": best_score,
+        }
 
     backend = ATTACK_TO_BACKEND[attack_type]
     client_ip = events[0].get("client_ip", "")
@@ -622,9 +782,8 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     if should_skip_cooldown(session_id, backend):
         return {"routed": False, "reason": "cooldown", "session_id": session_id, "backend": backend}
 
-    state = build_state_vector(rule_features, llm_output)
-
     payload = {
+        "state_schema": STATE_SCHEMA_VERSION,
         "protocol": "http",
         "session_id": session_id or None,
         "source_ip": client_ip or None,
@@ -642,13 +801,27 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
         "ts": now_iso(),
         "service": "llm-analyzer",
         "session_id": session_id,
+        "state_schema": STATE_SCHEMA_VERSION,
+        "semantic_source": semantic_source,
         "attack_type": attack_type,
         "target_backend": backend,
+        "target_scores": {
+            "sqli": state[7],
+            "cmdi": state[8],
+            "ssti": state[9],
+            "ssrf": state[10],
+        },
         "llm_confidence": llm_output.get("llm_confidence"),
         "controller_response": body,
     }, ensure_ascii=True))
 
-    return {"routed": True, "attack_type": attack_type, "backend": backend, "controller_response": body}
+    return {
+        "routed": True,
+        "attack_type": attack_type,
+        "backend": backend,
+        "semantic_source": semantic_source,
+        "controller_response": body,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +877,9 @@ def poll_elasticsearch_once() -> int:
             path = str(raw_app.get("path") or "")
             body = raw_app.get("body_preview")
             if sid and body:
-                service_bodies[(sid, method, path)] = str(body)[:2048]
+                body_preview = str(body)[:2048]
+                service_bodies[(sid, method, path)] = body_preview
+                remember_service_body(sid, method, path, body_preview)
             continue
 
         # Gateway event — collect for pass 2
@@ -729,6 +904,10 @@ def poll_elasticsearch_once() -> int:
         body_key = (sid, method, path)
         if body_key in service_bodies and not raw_app.get("body_preview"):
             raw_app["body_preview"] = service_bodies[body_key]
+        elif not raw_app.get("body_preview"):
+            cached_body = get_recent_service_body(sid, method, path)
+            if cached_body:
+                raw_app["body_preview"] = cached_body
 
         timestamp = (hit.get("_source") or {}).get("@timestamp", now_iso())
         event = clean_event(raw_app, timestamp)
@@ -793,6 +972,8 @@ def health() -> dict[str, Any]:
         return {"status": "ok"}
     return AnalyzerStats(
         enabled=ANALYZER_ENABLED,
+        state_schema=STATE_SCHEMA_VERSION,
+        state_dim=STATE_DIM,
         elasticsearch_url=ELASTICSEARCH_URL,
         routing_controller_url=ROUTING_CONTROLLER_URL,
         seen_events=len(seen_event_ids),

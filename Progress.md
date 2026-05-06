@@ -8,10 +8,10 @@ Dự án đã hoạt động đủ cho data plane + control plane trong web scop
 - Data plane: gateway HAProxy + real backend/frontend + 4 web honeypot.
 - Exposure mode: `debug` cho operator/test, `attack` cho demo attacker-facing.
 - Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
-- RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode. Runtime code hiện vẫn dùng state schema v1 24D.
-- LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) để trích xuất semantic features, dựng state v1 24D và gọi routing controller bất đồng bộ.
+- RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode. Runtime code đã migrate sang `rl_state_v2_16`.
+- LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) hoặc rule fallback để trích xuất semantic features, dựng state v2 16D và gọi routing controller bất đồng bộ.
 - Observability: Filebeat -> Elasticsearch -> Kibana hoạt động. Service-level syslog forwarding thu thập HTTP request body từ backend/honeypot.
-- Thiết kế state tiếp theo đã chốt: `rl_state_v2_16`, giảm từ 24D xuống 16D, giữ `protocol` ngoài tensor làm metadata của `/decide` để mở rộng SSH/FTP/SMTP bằng action masking.
+- State hiện tại: `rl_state_v2_16`, giảm từ 24D xuống 16D, giữ `protocol` ngoài tensor làm metadata của `/decide` để mở rộng SSH/FTP/SMTP bằng action masking.
 
 Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ, không chặn request path.
 
@@ -40,7 +40,7 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] Thêm route cleanup API `DELETE /routes` và Make target `make clear-routes`.
 - [x] Chặn non-HTTP/L4 placeholder khi `L4_ROUTING_ENABLED=false`.
 - [x] Thêm `llm_analyzer` service (`/health`) cho flow `log -> state -> decide -> route`.
-- [ ] Migrate runtime từ state v1 24D sang `rl_state_v2_16`.
+- [x] Migrate runtime từ state v1 24D sang `rl_state_v2_16`.
 - [x] Split-IP E2E `test_two_ip_split_routing.sh` pass (1 IP honeypot, 1 IP backend thật).
 
 ### Logging pipeline
@@ -57,8 +57,8 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] System prompt trích xuất 8-field semantic output: `attack_category`, `web_subtype_scores`, `evasion_score`, `historical_intent_consistency`, `attack_progression_stage`, `intent_shift_velocity`, `llm_confidence`, `updated_memory_context`.
 - [x] Validation + clamping output fields về [0, 1], graceful degradation khi LLM lỗi.
 - [x] E2E verified: CMDi payload (`127.0.0.1; cat /etc/passwd`) → LLM detect cmdi (score 0.8) → route `test-llm-groq` → `cmdi_api` → request tiếp theo trên session đó đi vào honeypot.
-- [ ] Bổ sung fallback rule-based khi thiếu `GROQ_API_KEY` hoặc LLM timeout để adaptive flow vẫn chạy được.
-- [ ] Không log full `llm_input_preview` chứa body/payload nhạy cảm trong demo attack-facing.
+- [x] Bổ sung fallback rule-based khi thiếu `GROQ_API_KEY` hoặc LLM timeout để adaptive flow vẫn chạy được.
+- [x] Không log full `llm_input_preview` chứa body/payload nhạy cảm trong demo attack-facing.
 
 ### RL state schema
 - [x] Chốt hướng giảm chiều: state v2 16D, `protocol` là metadata ngoài tensor.
@@ -79,7 +79,7 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
   - `evasion_score`
   - `attack_progression_stage`
   - `intent_stability_score`
-- [ ] Migrate `agent.py`, `routing_controller/main.py`, `llm_analyzer/analyzer.py`, dummy model scripts, synthetic data generator và test commands sang `STATE_DIM = 16`.
+- [x] Migrate `agent.py`, `routing_controller/main.py`, `llm_analyzer/analyzer.py`, dummy model scripts, synthetic data generator và test commands sang `STATE_DIM = 16`.
 
 ### Test harness
 - [x] `test_honeypots.py` ở root repo hoạt động ổn định.
@@ -134,7 +134,7 @@ Kết quả:
 
 - [x] ~~Thay dummy `llm_analyzer` bằng LLM analyzer gọi provider thật.~~
 - [ ] Hoàn thiện fallback/stability cho LLM analyzer để thiếu API key vẫn chạy được demo adaptive.
-- [ ] Migrate state v1 24D sang `rl_state_v2_16`.
+- [x] Migrate state v1 24D sang `rl_state_v2_16`.
 - [ ] Thay dummy policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
 - [ ] Hoàn thiện benchmark (route accuracy, false reroute, engagement).
 - [ ] Hoàn thiện L4 SSH/FTP/SMTP Drop-and-Catch nếu còn trong scope demo.

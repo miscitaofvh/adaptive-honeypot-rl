@@ -91,7 +91,7 @@ echo "[5/6] Route only client A via /decide (dummy model => ssti_api)..."
 curl -fsS -X DELETE "$CONTROLLER_URL/route/ip/$IP_A" >/dev/null 2>&1 || true
 
 DECIDE_PAYLOAD=$(cat <<EOF
-{"protocol":"http","source_ip":"$IP_A","apply_route":true,"state":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"state_schema":"rl_state_v2_16","protocol":"http","source_ip":"$IP_A","apply_route":true,"state":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
 EOF
 )
 

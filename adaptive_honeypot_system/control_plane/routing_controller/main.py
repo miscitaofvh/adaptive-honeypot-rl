@@ -26,6 +26,7 @@ from agent import (  # noqa: E402
     ACTION_ROUTE_SSRF,
     ACTION_ROUTE_SSTI,
     STATE_DIM,
+    STATE_SCHEMA_VERSION,
     LinearQAgent,
     action_backend,
     action_name,
@@ -69,6 +70,7 @@ agent = LinearQAgent(seed=123)
 
 
 class DecisionRequest(BaseModel):
+    state_schema: str = Field(default=STATE_SCHEMA_VERSION)
     protocol: str = Field(default="http")
     state: List[float] = Field(min_length=STATE_DIM, max_length=STATE_DIM)
     session_id: Optional[str] = None
@@ -83,8 +85,17 @@ class DecisionRequest(BaseModel):
             raise ValueError("protocol must be one of: http, ssh, ftp, smtp")
         return value
 
+    @field_validator("state_schema")
+    @classmethod
+    def validate_state_schema(cls, value: str) -> str:
+        value = value.strip()
+        if value != STATE_SCHEMA_VERSION:
+            raise ValueError(f"state_schema must be {STATE_SCHEMA_VERSION}")
+        return value
+
 
 class DecisionResponse(BaseModel):
+    state_schema: str
     protocol: str
     action_id: int
     action_name: str
@@ -187,7 +198,7 @@ def select_policy_action(req: DecisionRequest) -> int:
 def heuristic_action(state: List[float], protocol: str) -> int:
     """Deterministic dummy RL policy for the Web MVP.
 
-    It consumes the same 24D state vector as the trained agent. The policy is
+    It consumes the v2 16D state vector. The policy is
     deliberately conservative: keep benign traffic normal, but route strong
     web subtype evidence to the matching honeypot to maximize attacker
     engagement without protecting/blocking the service path.
@@ -196,18 +207,18 @@ def heuristic_action(state: List[float], protocol: str) -> int:
         return ACTION_KEEP_NORMAL
 
     subtype_candidates = [
-        (float(state[13]), ACTION_ROUTE_SQLI),
-        (float(state[14]), ACTION_ROUTE_CMDI),
-        (float(state[15]), ACTION_ROUTE_SSTI),
-        (float(state[16]), ACTION_ROUTE_SSRF),
+        (float(state[7]), ACTION_ROUTE_SQLI),
+        (float(state[8]), ACTION_ROUTE_CMDI),
+        (float(state[9]), ACTION_ROUTE_SSTI),
+        (float(state[10]), ACTION_ROUTE_SSRF),
     ]
     best_score, best_action = max(subtype_candidates, key=lambda item: item[0])
-    injection_score = float(state[9])
-    evasion_score = float(state[17])
+    payload_complexity = float(state[3])
+    evasion_score = float(state[13])
 
     if best_score >= HEURISTIC_ROUTE_THRESHOLD:
         return best_action
-    if injection_score >= 0.65 and evasion_score >= 0.40:
+    if payload_complexity >= 0.70 and evasion_score >= 0.40 and best_score >= 0.25:
         return best_action
     return ACTION_KEEP_NORMAL
 
@@ -295,6 +306,7 @@ def log_decision(req: DecisionRequest, action_idx: int, backend: str, applied: b
         "ts": datetime.now(timezone.utc).isoformat(),
         "service": "routing-controller",
         "policy_mode": POLICY_MODE,
+        "state_schema": req.state_schema,
         "protocol": req.protocol,
         "session_id": req.session_id or "",
         "source_ip": req.source_ip or "",
@@ -331,7 +343,15 @@ def try_load_model(path: Path) -> tuple[bool, str]:
         return False, f"Model not found at {path}. Using untrained agent."
 
     with model_lock:
-        agent = LinearQAgent.load(path)
+        loaded_agent = LinearQAgent.load(path)
+        if loaded_agent.state_dim != STATE_DIM:
+            agent = LinearQAgent(seed=123)
+            return (
+                False,
+                f"Model state_dim {loaded_agent.state_dim} does not match runtime {STATE_DIM}. "
+                "Using untrained agent.",
+            )
+        agent = loaded_agent
     return True, f"Model loaded from {path}"
 
 
@@ -362,6 +382,8 @@ def health() -> dict:
         "routing_script": str(ROUTING_SCRIPT),
         "model_exists": MODEL_PATH.exists(),
         "policy_mode": POLICY_MODE,
+        "state_schema": STATE_SCHEMA_VERSION,
+        "state_dim": STATE_DIM,
         "heuristic_route_threshold": HEURISTIC_ROUTE_THRESHOLD,
         "l4_routing_enabled": L4_ROUTING_ENABLED,
         "implemented_backends": sorted(HTTP_BACKENDS),
@@ -416,6 +438,7 @@ def decide(req: DecisionRequest) -> DecisionResponse:
     log_decision(req, action_idx, chosen_backend, applied, route_output)
 
     return DecisionResponse(
+        state_schema=req.state_schema,
         protocol=req.protocol,
         action_id=action_idx,
         action_name=action_name(action_idx),

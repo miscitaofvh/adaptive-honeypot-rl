@@ -36,8 +36,8 @@ Phạm vi control plane hiện tại:
 ## 3) Thiết kế state và action
 
 ### State
-- Runtime code hiện tại vẫn dùng vector v1 24 chiều (`STATE_DIM = 24`) trong `agent.py`, `routing_controller`, analyzer và generator.
-- Thiết kế tiếp theo đã chốt là `rl_state_v2_16`: giảm xuống 16 chiều, thực tiễn hơn cho Web MVP nhưng vẫn mở rộng được SSH/FTP/SMTP.
+- Runtime code hiện tại dùng `rl_state_v2_16` (`STATE_DIM = 16`) trong `agent.py`, `routing_controller`, analyzer và generator.
+- Schema này giảm từ v1 24D xuống 16 chiều, thực tiễn hơn cho Web MVP nhưng vẫn mở rộng được SSH/FTP/SMTP.
 - `protocol` không nằm trong tensor v2. Nó là metadata bắt buộc của `/decide`, dùng cho action masking và normalizer profile theo giao thức.
 
 Schema target v2:
@@ -93,8 +93,7 @@ Mask được enforce bởi `allowed_action_indices()` khi inference và khi tí
 Implementation hiện tại là offline Q-learning với mô hình tuyến tính trên PyTorch:
 
 - Mô hình: `Q(s, a) = w_a^T s + b_a`
-- Kiến trúc runtime hiện tại: `nn.Linear(24, 8)` / JSON linear weights 24D.
-- Kiến trúc sau migration v2: `nn.Linear(16, 8)` / JSON linear weights 16D.
+- Kiến trúc runtime hiện tại: `nn.Linear(16, 8)` / JSON linear weights 16D.
 - Tối ưu: `AdamW` + weight decay (`l2`) + gradient clipping.
 - Loss: `MSE(Q(s,a), target)`.
 
@@ -259,28 +258,17 @@ curl -s -X POST "http://localhost:8001/route/ip/172.22.0.99?backend=ssti_api" | 
 curl -s -X POST http://localhost:8001/decide \
   -H 'Content-Type: application/json' \
   -d '{
+    "state_schema": "rl_state_v2_16",
     "protocol": "http",
     "session_id": "sid_demo_001",
     "apply_route": true,
-    "state": [1,0,0,0,0.2,0.8,0.7,0.6,0.4,1,0,0,0,0.9,0.05,0.03,0.02,0.7,0,0.1,0.7,0.5,0.9,0.2]
+    "state": [0.2,0.8,0.7,0.6,0.4,0,0,0.9,0.05,0.03,0.02,0,0,0.7,0.5,0.9]
   }' | jq .
 ```
 
 Mong đợi:
 - Controller trả về `action_name` và `backend`.
 - Nếu `apply_route=true`, map sẽ được cập nhật qua `routing_update.sh`.
-
-Lưu ý: payload trên là ví dụ cho runtime hiện tại 24D. Sau khi migrate sang `rl_state_v2_16`, payload test tương đương sẽ là:
-
-```json
-{
-  "state_schema": "rl_state_v2_16",
-  "protocol": "http",
-  "session_id": "sid_demo_001",
-  "apply_route": true,
-  "state": [0.2,0.8,0.7,0.6,0.4,0,0,0.9,0.05,0.03,0.02,0,0,0.7,0.5,0.9]
-}
-```
 
 ### Xóa route test thủ công
 
@@ -316,15 +304,15 @@ Script sẽ:
 
 ## 10) Giới hạn hiện tại
 
-- `llm_analyzer` đã gọi Groq khi có key, nhưng fallback khi provider lỗi/thiếu key chưa đủ chắc.
-- Runtime state vẫn là v1 24D; migration sang `rl_state_v2_16` chưa implement.
+- `llm_analyzer` đã gọi Groq khi có key và có rule fallback khi provider lỗi/thiếu key; phần còn lại là provider abstraction, retry/backoff, và memory decay.
+- Runtime state đã là `rl_state_v2_16`.
 - Mô hình hiện tại là linear Q approximation, chưa phải DQN/BCQ đầy đủ.
 - Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
 - Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.
 
 ## 11) Hướng phát triển tiếp
 
-- Migrate state builder từ v1 24D sang `rl_state_v2_16`.
+- Tách feature computation còn nằm trong analyzer sang state builder package.
 - Bổ sung rule fallback cho LLM analyzer.
 - Train trên replay buffer tách từ traffic logs.
 - Thêm integration test đầy đủ: `log ingest -> state build -> RL decide -> routing update`.

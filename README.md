@@ -26,10 +26,10 @@ Nguyên tắc quan trọng: control plane chạy bất đồng bộ với luồn
 - Đã có structured JSON logging cho real backend và honeypots.
 - Đã có `POST /api/articles/search` ở real backend để khớp SQLI honeypot contract.
 - Đã có `llm_analyzer` service chạy flow bất đồng bộ `log -> state -> decide -> route`.
-- Analyzer hiện có Groq integration (`GROQ_API_KEY`, mặc định model `llama-3.3-70b-versatile`), nhưng fallback khi thiếu key/chạy lỗi vẫn cần hoàn thiện để demo ổn định.
+- Analyzer hiện có Groq integration (`GROQ_API_KEY`, mặc định model `llama-3.3-70b-versatile`) và rule-based fallback khi thiếu key/provider lỗi để Web flow vẫn route được các attack rõ ràng.
 - Đã có dummy heuristic RL mode (`RL_POLICY_MODE=heuristic`) để route theo subtype score.
 - Đã có bộ RL offline + dummy model để test route có tính lặp lại.
-- Runtime code hiện vẫn dùng state schema v1 24D; schema v2 16D đã được chốt để migrate trước khi train/evaluate RL thật.
+- Runtime code đã dùng `rl_state_v2_16` (`STATE_DIM = 16`) trong analyzer, routing controller, RL agent, dummy model và synthetic data generator.
 - Đã có script test honeypot độc lập (`test_honeypots.py`) + Make target.
 - Đã có test split-IP end-to-end (1 IP vào honeypot, 1 IP vào backend thật).
 
@@ -103,11 +103,7 @@ URL dịch vụ: `http://localhost:8002`
 Analyzer hiện poll Elasticsearch (`honeypot-logs-*`), gom session theo `sid`, enrich payload/body từ service logs, gọi Groq để trích xuất semantic features, rồi gọi routing controller bất đồng bộ. Endpoint debug `POST /analyze` đã không còn trong source hiện tại; test/manual injection nên đi qua log pipeline thật.
 
 ## 6.2) RL state schema
-Trạng thái code hiện tại:
-- `routing_controller`, `rl_agent`, synthetic data generator và analyzer vẫn đang dùng `STATE_DIM = 24`.
-- Đây là schema v1, còn chứa vài chiều chưa thực sự có tín hiệu thật trong Web MVP như `attack_vector_shift` placeholder và `memory_decay_weight`.
-
-Schema đã chốt để migrate:
+Schema runtime hiện tại:
 - `rl_state_v2_16`, 16 chiều.
 - `protocol` là metadata bắt buộc của `/decide`, không nằm trong tensor; controller dùng nó cho action masking và normalizer profile.
 - State chỉ chứa tín hiệu hành vi/semantic đã normalize, đủ mở rộng sang SSH/FTP/SMTP mà không tăng chiều chỉ vì thêm protocol.
@@ -213,8 +209,8 @@ Lần chạy hợp nhất gần nhất được ghi nhận trước đó:
   - SSRF: `http://localhost:5005`
 
 ## 12) Giới hạn hiện tại
-- `llm_analyzer` đã có Groq API integration, nhưng fallback khi thiếu/timeout LLM chưa đủ chắc: hiện có thể không route nếu LLM không trả output.
-- Code runtime vẫn là state v1 24D; state v2 16D đã được chốt và cần migrate đồng bộ trong analyzer, RL agent, controller, dummy model, data generator, tests và docs.
+- `llm_analyzer` đã có Groq API integration và rule-based fallback. Phần cần polish tiếp là provider abstraction, retry/backoff, và memory decay.
+- Runtime state đã là `rl_state_v2_16`; model artifacts/dataset cũ 24D cần regenerate trước khi dùng `RL_POLICY_MODE=model`.
 - `RL_POLICY_MODE=heuristic` là dummy RL policy cho Web MVP; train offline thật vẫn là bước nghiên cứu tiếp theo.
 - L4 SSH/FTP/SMTP Drop-and-Catch vẫn chưa implement; controller sẽ reject non-HTTP route khi `L4_ROUTING_ENABLED=false`.
 - Benchmark nghiên cứu đầy đủ vẫn cần bổ sung sau khi thu được replay buffer/log thật.

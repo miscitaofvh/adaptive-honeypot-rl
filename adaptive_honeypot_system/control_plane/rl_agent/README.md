@@ -18,8 +18,8 @@ Rang buoc quan trong:
 
 State/action:
 
-- Runtime hien tai: `STATE_DIM = 24`.
-- Schema da chot de migrate: `rl_state_v2_16` voi 16 floats.
+- Runtime hien tai: `STATE_DIM = 16`.
+- Schema: `rl_state_v2_16` voi 16 floats.
 - Trong v2, `protocol` la metadata cua `/decide`, khong nam trong tensor.
 - HTTP actions: keep normal, SQLI, SSTI, CMDI, SSRF.
 - SSH/FTP/SMTP actions ton tai trong schema de giu alignment voi proposal, nhung L4 data plane chua implement.
