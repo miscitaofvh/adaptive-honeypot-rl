@@ -6,7 +6,7 @@ Chuc nang:
 
 - Load RL model JSON neu `RL_POLICY_MODE=model`.
 - Chay dummy heuristic policy neu `RL_POLICY_MODE=heuristic`.
-- Nhan 24D state vector qua `/decide`.
+- Nhan runtime state vector qua `/decide`.
 - Chon action/backend va cap nhat session/IP map bang `gateway/routing_update.sh`.
 - Expose route inspection endpoints trong debug mode de test.
 
@@ -25,6 +25,12 @@ Policy modes:
 
 - `model`: dung `LinearQAgent` JSON artifact.
 - `heuristic`: dummy RL stand-in, route HTTP theo web subtype scores trong state.
+
+State schema:
+
+- Runtime hien tai van validate `STATE_DIM = 24`.
+- Target migration: `rl_state_v2_16`, 16 floats.
+- `protocol` tiep tuc la metadata cua `/decide`; controller dung `protocol` de action masking va reject non-HTTP khi L4 disabled.
 
 Luu y:
 

@@ -132,13 +132,10 @@ Thông qua state builder, các state này sẽ được kết hợp cùng các s
 
 ## 8. RL Formulation (BCQ hoặc các thuật toán khác)
 ### 8.1 State
-Vector state gọn, dự kiến gồm:
+Vector state v2 được tinh gọn để giảm số chiều nhưng vẫn mở rộng được sang HTTP/SSH/FTP/SMTP. `protocol` không nằm trong tensor mà là metadata bắt buộc gửi kèm `/decide`; controller dùng metadata này để action masking và chọn profile normalize theo giao thức.
+
 ```python
 state = {
-    # PROTOCOL (1)
-    "protocol_onehot": [1, 0, 0, 0],
-    # [http, ssh, ftp, smtp] — one-hot, dùng bởi action masking
-
     # SESSION METRICS (3)
     "session_age_norm": 0.42,
     # Thời gian sống của session/IP, normalize theo max_window (vd: 10 phút)
@@ -150,93 +147,78 @@ state = {
     # Số request/auth thất bại tích lũy. Quan trọng cho bruteforce & enumeration detection
 
     # PAYLOAD SIGNALS (2)
-    "content_size_anomaly": 0.73,
-    # Z-score kích thước payload so với baseline của service đó, đã normalize về [0,1]
+    "payload_complexity_norm": 0.73,
+    # Mức bất thường/độ phức tạp payload, kết hợp size, ký tự nguy hiểm, encoding/obfuscation
     
-    "probe_diversity_norm": 0.52,
-    # Số lượng path/command/user khác nhau đã thử / tổng attempt. Phát hiện enumeration.
+    "target_diversity_norm": 0.52,
+    # Số lượng path/command/user/endpoint khác nhau đã thử / tổng attempt. Phát hiện enumeration.
     # Với injection attack thần thuần → thường thấp
 
-    # LLM SEMANTIC (4)
-    "attack_category_onehot": [1, 0, 0, 0],
-    # Encode từ LLM.attack_category: [injection, bruteforce, enumeration, malformed]
-    
-    "web_subtype_scores": [0.82, 0.05, 0.07, 0.06],
-    # Trực tiếp từ LLM output: [sqli, cmdi, ssti, ssrf]
-    # Non-HTTP session → [0, 0, 0, 0]
-    
-    "evasion_score": 0.45,
-    # Trực tiếp từ LLM output
-    
-    "llm_confidence": 0.81,
-    # Trực tiếp từ LLM output, dùng để scale weight của 3 trường LLM còn lại
-
-    # ROUTING STATE (2)
+    # ROUTING / ENGAGEMENT STATE (2)
     "current_route": 0,
-    # 0: Normal Service | 1: Honeypot — cho phép RL biết mình đang ở đâu để tránh re-route thừa
+    # 0: Normal Service | 1: Honeypot — giúp RL tránh re-route thừa
     
-    "attack_vector_shift": 0.35,
-    # Cosine distance giữa attack_category_onehot của window hiện tại
-    # so với window trước đó (rolling). Cao → attacker đang đổi chiến thuật.
+    "engagement_depth_norm": 0.30,
+    # Mức attacker đang tiếp tục tương tác sau route: dwell time, request count, command count, v.v.
+
+    # TARGET / HONEYPOT SCORES (6)
+    "target_sqli_score": 0.82,
+    "target_cmdi_score": 0.05,
+    "target_ssti_score": 0.07,
+    "target_ssrf_score": 0.06,
+    "target_credential_attack_score": 0.00,
+    "target_enumeration_score": 0.00,
+    # HTTP dùng 4 score đầu. SSH/FTP/SMTP dùng credential/enumeration score.
 
     # SEMANTIC MEMORY FEATURES (Do LLM tổng hợp từ quá khứ)
-    "historical_intent_consistency": 0.85, 
-    # Độ nhất quán của ý định tấn công từ đầu session (0: hỗn loạn, 1: tập trung 1 mục tiêu)
+    "evasion_score": 0.45,
+    # Mức né tránh/obfuscation, scale bởi llm_confidence trước khi đưa vào tensor
     
     "attack_progression_stage": 0.4, 
     # Giai đoạn tấn công: 0.2 (Recon), 0.5 (Exploit), 0.8 (Post-Exploit)
     
-    "memory_decay_weight": 0.95,
-    # Trọng số tin cậy của lịch sử (giảm dần nếu attacker im lặng quá lâu)
-
-    # TEMPORAL SHIFT
-    "intent_shift_velocity": 0.12,
-    # Tốc độ thay đổi chiến thuật của attacker dựa trên so sánh Memory cũ và Log mới
+    "intent_stability_score": 0.74,
+    # Tín hiệu tổng hợp từ historical_intent_consistency và intent_shift_velocity.
 }
 ```
 
 ### Giải thích:
-Để tương thích với thuật toán BCQ, State Dictionary được flatten thành Tensor 1D 24 chiều. Các đặc trưng từ LLM được scale với llm_confidence trước khi ghép nối:
+Để tương thích với thuật toán RL/BCQ, State Dictionary được flatten thành Tensor 1D 16 chiều. Các đặc trưng từ LLM được scale với `llm_confidence` trước khi ghép nối, nhưng `llm_confidence` không nằm trong tensor để tránh tăng chiều không cần thiết.
+
 ```python
 # Tiền xử lý Graceful Degradation
-effective_category = attack_category_onehot * llm_confidence
-effective_subtype  = web_subtype_scores * llm_confidence
-effective_evasion  = evasion_score * llm_confidence
+effective_target_scores = target_scores * llm_confidence
+effective_evasion = evasion_score * llm_confidence
+effective_progression = attack_progression_stage * llm_confidence
 
 # Tiền xử lý Memory
-effective_historical_consistency = historical_intent_consistency * llm_confidence
-effective_progression = attack_progression_stage * llm_confidence
-effective_shift_velocity = intent_shift_velocity * llm_confidence
+intent_stability_score = historical_intent_consistency * (1 - intent_shift_velocity) * llm_confidence
 
-# 24 chiều
+# 16 chiều
 state_tensor = np.concatenate([
-    protocol_onehot,                     # 4
     [session_age_norm],                  # 1
     [interaction_rate_norm],             # 1
     [failed_attempts_norm],              # 1
-    [content_size_anomaly],              # 1
-    [probe_diversity_norm],              # 1
-    effective_category,                  # 4
-    effective_subtype,                   # 4
-    [effective_evasion],                 # 1
+    [payload_complexity_norm],           # 1
+    [target_diversity_norm],             # 1
     [current_route],                     # 1
-    [attack_vector_shift],               # 1
-    # --- MEMORY FEATURES ---
-    [effective_historical_consistency],  # 1
+    [engagement_depth_norm],             # 1
+    effective_target_scores,             # 6
+    [effective_evasion],                 # 1
     [effective_progression],             # 1
-    [memory_decay_weight],               # 1 
-    [effective_shift_velocity]           # 1
+    [intent_stability_score]             # 1
 ])
 ```
 
-* **Protocol (4D one-hot):** Không encode dạng integer (0/1/2/3) vì gây ra quan hệ thứ tự giả tạo giữa các protocol. One-hot là input trực tiếp cho action masking layer — gán các Q-values của action không thuộc protocol hiện tại thành $-\infty$ (âm vô cực) trước bước argmax để loại bỏ triệt để.
+* **Protocol metadata:** Không encode dạng integer (0/1/2/3) vì gây quan hệ thứ tự giả tạo. Cũng không giữ one-hot trong tensor vì `/decide` đã nhận `protocol` riêng. Controller dùng `protocol` để action masking — gán các Q-values của action không thuộc protocol hiện tại thành $-\infty$ trước bước argmax.
 * **Session Metrics (3 scalar):** Ba trường đo hành vi theo thời gian tích lũy, không phải snapshot tức thời. `session_age_norm` normalize theo max expected session window (e.g. 600s). `interaction_rate_norm` và `failed_attempts_norm` normalize theo ngưỡng anomaly của từng protocol riêng biệt (ngưỡng SSH brute khác HTTP flood) để tránh lệch scale.
-* **Payload Signals (2 scalar):** `content_size_anomaly` dùng Z-score so với rolling baseline của chính service đó, clip về [0,1]. `probe_diversity_norm` = `unique_targets / total_attempts` — tự nhiên nằm trong [0,1], không cần normalize thêm. Hai trường này bổ sung chiều không gian mà LLM không nhìn thấy được (volumetric pattern).
-* **Semantic & Memory Features (12 scalar)**: Trích xuất từ cơ chế Two-tier Memory của LLM. Các biến như historical_intent_consistency, attack_progression_stage giúp RL Agent thoát khỏi giới hạn "mù lịch sử" (Partial Observability) của MDP truyền thống. Toàn bộ thông số này được scale bởi llm_confidence. Nếu LLM bị ảo giác hoặc trả về độ tự tin thấp, các giá trị này mờ về 0, ép RL Agent phải dựa dẫm vào các chỉ số mạng cơ bản để ra quyết định an toàn.
-* **Routing State (2 scalar):** `current_route` giúp RL phân biệt hai policy khác nhau: khi đang ở Normal thì ưu tiên detect & route, khi đã ở Honeypot thì ưu tiên giữ nguyên tránh re-route thừa làm lộ hệ thống. `attack_vector_shift` là cosine distance giữa `attack_category_onehot` của window $t$ và $t{-}1$ — trường duy nhất mang tín hiệu **temporal change**, thiếu nó RL không thể phân biệt attacker đang tấn công ổn định hay đang đổi chiến thuật trong cùng session. Nếu là window đầu tiên của session, `attack_vector_shift` mặc định gán bằng 0.
+* **Payload Signals (2 scalar):** `payload_complexity_norm` thay cho size-only anomaly để thực tế hơn với Web/L4; có thể lấy từ size, entropy, ký tự nguy hiểm, encoding. `target_diversity_norm` = `unique_targets / total_attempts`.
+* **Target Scores (6 scalar):** Đây là lớp trừu tượng giữa LLM và RL. HTTP dùng SQLi/CMDi/SSTI/SSRF; SSH/FTP/SMTP dùng credential attack/enumeration. Khi thêm giao thức mới, ưu tiên map vào target score hiện có trước khi tăng chiều state.
+* **Engagement State:** `engagement_depth_norm` là tín hiệu trực tiếp cho mục tiêu khóa luận: attacker có tiếp tục tương tác sau khi bị route sang honeypot hay không.
+* **Semantic Memory:** `intent_stability_score` gộp `historical_intent_consistency`, `intent_shift_velocity`, và confidence. Nó thay cho `attack_vector_shift` + `memory_decay_weight` trong schema cũ, giảm chiều nhưng vẫn giữ tín hiệu attacker đang ổn định hay đổi chiến thuật.
 
 ### 8.2 Actions & Action Masking
-Thay vì cho phép chọn tự do gây lỗi định tuyến chéo giao thức, hệ thống áp dụng **Action Masking**. Dựa vào `protocol` ở State, Controller sẽ mask (đưa xác suất về 0) các action không hợp lệ. 
+Thay vì cho phép chọn tự do gây lỗi định tuyến chéo giao thức, hệ thống áp dụng **Action Masking**. Dựa vào `protocol` metadata của request `/decide`, Controller sẽ mask (đưa xác suất về 0) các action không hợp lệ.
 Agent chỉ được chọn trong các tập con sau:
 - Nếu HTTP: `[KEEP_NORMAL, SQLi_POT, SSTI_POT, SSRF_POT, CMDi_POT]`
 - Nếu SSH: `[KEEP_NORMAL, SSH_POT]`

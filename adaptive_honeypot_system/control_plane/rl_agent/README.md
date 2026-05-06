@@ -18,7 +18,27 @@ Rang buoc quan trong:
 
 State/action:
 
-- `STATE_DIM = 24`.
+- Runtime hien tai: `STATE_DIM = 24`.
+- Schema da chot de migrate: `rl_state_v2_16` voi 16 floats.
+- Trong v2, `protocol` la metadata cua `/decide`, khong nam trong tensor.
 - HTTP actions: keep normal, SQLI, SSTI, CMDI, SSRF.
 - SSH/FTP/SMTP actions ton tai trong schema de giu alignment voi proposal, nhung L4 data plane chua implement.
 
+`rl_state_v2_16` target order:
+
+1. `session_age_norm`
+2. `interaction_rate_norm`
+3. `failed_attempts_norm`
+4. `payload_complexity_norm`
+5. `target_diversity_norm`
+6. `current_route`
+7. `engagement_depth_norm`
+8. `target_sqli_score`
+9. `target_cmdi_score`
+10. `target_ssti_score`
+11. `target_ssrf_score`
+12. `target_credential_attack_score`
+13. `target_enumeration_score`
+14. `evasion_score`
+15. `attack_progression_stage`
+16. `intent_stability_score`

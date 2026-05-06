@@ -1,30 +1,37 @@
-# Dummy LLM Analyzer
+# LLM Analyzer
 
-This component is a temporary, deterministic stand-in for the proposal's stateful LLM analyzer.
+This component is the asynchronous analyzer for the Web MVP control plane.
 
 Responsibilities:
 
 - Poll Elasticsearch for recent structured backend/honeypot logs.
-- Detect SQLi, CMDI, SSTI, and SSRF with conservative regex heuristics.
-- Build a proposal-compatible 24D state vector.
+- Build session context from HAProxy gateway logs.
+- Enrich gateway events with service-level `body_preview` from backend/honeypot logs.
+- Call Groq when `GROQ_API_KEY` is available.
+- Validate semantic output for SQLi, CMDI, SSTI, SSRF, evasion, progression, and memory.
+- Build the current runtime 24D state vector and call the routing controller.
 - Call `routing_controller /decide` asynchronously.
 - Log route-decision events for observability.
 
 Important constraints:
 
-- It does not call a real LLM provider.
+- It currently calls Groq directly; provider abstraction/fallback is still incomplete.
 - It does not train or run a real RL model.
 - It keeps the control plane asynchronous: request traffic never waits on this service.
-- It exists so the full lab flow works end-to-end while LLM/RL research pieces are developed later.
-- On startup it only analyzes events newer than the analyzer process start time, so old lab traffic cannot replay stale routes into HAProxy maps.
-- In this dummy milestone, only `real-backend` events can create route decisions. Honeypot events are treated as passive engagement observations so direct honeypot tests cannot poison IP/session maps.
+- If Groq is missing or times out, the next implementation step is to fall back to rule-based state extraction so the demo remains stable.
+- Runtime code still builds state schema v1 24D; approved target schema is `rl_state_v2_16`.
 
 Runtime endpoints:
 
 - `GET /health`: debug mode tra ve analyzer stats; attack mode chi tra ve `{"status":"ok"}`.
-- `POST /analyze`: manual/debug event injection, chi bat trong `EXPOSURE_MODE=debug`.
 
 Exposure modes:
 
-- `EXPOSURE_MODE=debug`: bat docs/OpenAPI, health stats, va `/analyze`.
-- `EXPOSURE_MODE=attack`: tat docs/OpenAPI, an analyzer stats, va tra `404` cho `/analyze`.
+- `EXPOSURE_MODE=debug`: bat docs/OpenAPI va health stats.
+- `EXPOSURE_MODE=attack`: tat docs/OpenAPI va an analyzer stats.
+
+State migration target:
+
+- `rl_state_v2_16`, 16 floats.
+- `protocol` is `/decide` metadata, not part of the tensor.
+- LLM confidence should scale semantic fields before building the tensor, while the raw confidence remains in logs for debugging.

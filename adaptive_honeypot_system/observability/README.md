@@ -18,5 +18,5 @@ File chinh:
 Luu y:
 
 - Filebeat khong con filter theo hardcoded container IDs.
-- Analyzer hien poll Elasticsearch de tao dummy decisions, nen ES/Filebeat la mot phan cua flow demo Web MVP.
-
+- Analyzer hien poll Elasticsearch de tao LLM-backed route decisions, nen ES/Filebeat la mot phan cua flow demo Web MVP.
+- Runtime state hien van la v1 24D; target migration la `rl_state_v2_16`.

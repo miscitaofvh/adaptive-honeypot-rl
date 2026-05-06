@@ -75,15 +75,14 @@ Attack-facing mode dùng khi demo dưới góc nhìn user/attacker:
 make mode-attack
 curl -s http://localhost:18080/api/health
 curl -i http://localhost:8001/routes
-curl -i -X POST http://localhost:8002/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"path":"/api/articles/search","body_preview":"union select password from users"}'
+curl -i http://localhost:8002/docs
 ```
 
 Expected trong attack mode:
 
 - `/api/health` chỉ trả `{"status":"ok"}`.
-- `/routes`, `/route/...`, `/model/reload`, `/analyze`, `/docs`, `/openapi.json` trả `404`.
+- `/routes`, `/route/...`, `/model/reload`, `/docs`, `/openapi.json` trả `404`.
+- Analyzer debug injection endpoint `/analyze` đã không còn trong source hiện tại; manual test nên đi qua request thật và log pipeline.
 - HAProxy Stats UI trên `:8404/stats` bị tắt ở runtime.
 - `/decide` vẫn được giữ cho analyzer nội bộ, không dùng như endpoint demo public.
 
@@ -98,7 +97,7 @@ make mode-debug
 - Frontend/Gateway: `http://localhost:18080`
 - HAProxy stats: `http://localhost:8404/stats`
 - Routing controller: `http://localhost:8001`
-- Dummy LLM analyzer: `http://localhost:8002`
+- LLM analyzer: `http://localhost:8002`
 - Elasticsearch: `http://localhost:9200`
 - Kibana: `http://localhost:5601`
 - CMDI honeypot direct: `http://localhost:5002`
@@ -404,7 +403,7 @@ make clear-routes
 Phần này kiểm tra main project flow:
 
 ```text
-real backend -> structured log -> Filebeat/Elasticsearch -> dummy analyzer
+real backend -> structured log -> Filebeat/Elasticsearch -> LLM analyzer
 -> routing controller -> HAProxy session map -> honeypot
 ```
 
@@ -440,6 +439,8 @@ curl -s -X POST "http://localhost:18080/api/articles/search" \
 ```
 
 Request đầu tiên dự kiến sẽ đi tới real backend. Analyzer chạy bất đồng bộ.
+
+Lưu ý: code hiện tại gọi Groq. Nếu thiếu `GROQ_API_KEY` hoặc provider timeout, fallback rule-based chưa hoàn chỉnh nên route có thể không xuất hiện. Đây là hạng mục cần sửa trước khi coi demo ổn định 100%.
 
 Kiểm tra session route:
 
@@ -552,7 +553,7 @@ curl -s -X POST "http://localhost:9200/honeypot-logs-*/_search" \
     "sort": [{"@timestamp": {"order": "desc"}}],
     "query": {
       "query_string": {
-        "query": "route_decision OR dummy_llm_decision"
+        "query": "route_decision OR llm_route_decision"
       }
     }
   }'

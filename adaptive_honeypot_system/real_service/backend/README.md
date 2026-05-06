@@ -5,7 +5,7 @@ Component nay la Flask API that cua ung dung Meridian.
 Chuc nang:
 
 - Cung cap API benign cho frontend.
-- Tao structured JSON logs de Filebeat/Elasticsearch va dummy analyzer doc.
+- Tao structured JSON logs de Filebeat/Elasticsearch va LLM analyzer doc.
 - Giu API contract gan voi web honeypots de rerouting khong lam frontend vo.
 
 Blueprints:

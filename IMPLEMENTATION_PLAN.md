@@ -8,16 +8,18 @@ Nguyen tac quan trong nhat cua do an: he thong khong tap trung "bao ve service" 
 
 ## 1) Current status snapshot
 
-Trang thai sau dot implement 2026-05-05:
+Trang thai sau khi pull/scan 2026-05-06:
 
-- Web MVP da chay end-to-end bang dummy LLM/RL:
-  `real-backend log -> Filebeat/Elasticsearch -> dummy llm_analyzer -> routing_controller -> HAProxy session map -> web honeypot`.
+- Web MVP da co data plane + control plane du de demo local:
+  `real-backend log -> Filebeat/Elasticsearch -> llm_analyzer -> routing_controller -> HAProxy session map -> web honeypot`.
 - Control plane van bat dong bo voi request path. Request web khong cho analyzer/RL xu ly dong bo.
 - Runtime Docker services khong cai PyTorch. PyTorch chi dung local cho offline training.
-- LLM analyzer that va RL policy that chua implement. Hien tai chi co dummy/rule-based analyzer va dummy heuristic policy.
+- LLM analyzer da co Groq API integration, nhung fallback khi thieu API key/timeout chua chac; neu LLM khong tra output thi adaptive route co the khong dien ra.
+- RL policy that chua implement. Hien tai Web MVP van dua vao `RL_POLICY_MODE=heuristic` hoac dummy JSON model.
+- Runtime code van dung state schema v1 24D. Da chot schema v2 16D de migrate truoc khi train/evaluate RL that.
 - L4 SSH/FTP/SMTP Drop-and-Catch chua implement. Controller/gateway da fail ro rang neu dung L4 placeholder.
 - Route maps duoc clear sau E2E tests de tranh stale state.
-- Da co `EXPOSURE_MODE=debug|attack`: debug giu operator endpoints/metadata; attack an service identity, route/analyzer debug APIs, docs/OpenAPI, va HAProxy Stats UI.
+- Da co `EXPOSURE_MODE=debug|attack`: debug giu operator endpoints/metadata; attack an service identity, route debug APIs, docs/OpenAPI, va HAProxy Stats UI. Analyzer debug endpoint `/analyze` khong con trong source hien tai.
 
 ## 2) Verified commands
 
@@ -32,7 +34,7 @@ make validate
 
 Ket qua quan trong:
 
-- `make test-adaptive-web`: PASS
+- `make test-adaptive-web`: PASS o milestone dummy/heuristic truoc do
   - SQLi-like request vao real backend.
   - Analyzer doc log tu Elasticsearch.
   - Controller route session sang `sqli_api`.
@@ -52,13 +54,14 @@ Ket qua quan trong:
 | --- | --- | --- | --- |
 | Web data plane | DONE for MVP | HAProxy normal/honeypot mode, session/IP route maps, 4 web honeypot, real backend/frontend | Benchmark multi-session, contract tests chuan hon |
 | Real backend contract | DONE for MVP | Them `POST /api/articles/search`, frontend client `searchArticles`, DB init lock | Formal contract pytest suite, more edge cases |
-| Routing controller | DONE for MVP | `/decide`, model reload/debug endpoints, heuristic mode, backend validation, inspect routes, `DELETE /routes`, L4 disabled 501, attack-mode endpoint hiding | Unit tests, route history store, policy cooldown in controller |
-| Demo exposure surface | DONE for MVP | `EXPOSURE_MODE=debug|attack`, generic health in attack mode, `/routes`/`/analyze` hidden, HAProxy Stats UI disabled | Network-level compose override to publish only gateway in attack demo |
+| Routing controller | DONE for MVP | `/decide`, model reload/debug endpoints, heuristic mode, backend validation, inspect routes, `DELETE /routes`, L4 disabled 501, attack-mode endpoint hiding | Unit tests, route history store, policy cooldown in controller, migrate `/decide` state schema v2 |
+| Demo exposure surface | DONE for MVP | `EXPOSURE_MODE=debug|attack`, generic health in attack mode, `/routes` hidden, analyzer debug injection endpoint removed, HAProxy Stats UI disabled | Network-level compose override to publish only gateway in attack demo |
 | Gateway route updates | DONE for MVP | Idempotent map update/remove, clear all maps, `drop_connection` fail ro rang | L4 drop implementation neu chon lam Phase 8 |
 | Structured logging | DONE for MVP | JSON logs cho backend/honeypots, request/session/body preview, masking co ban | Gateway selected-backend parsing, Kibana dashboard |
 | Filebeat/ES | DONE for MVP | Docker log ingest, JSON decode, bo hardcoded container IDs, giu controller/analyzer logs | Saved searches/dashboard, retention/index template polish |
-| Dummy LLM analyzer | DONE for MVP | Poll ES, detect SQLi/CMDI/SSTI/SSRF, build 24D state, call controller, skip stale/honeypot-only logs | Real LLM provider, Redis memory, formal state builder module |
+| LLM analyzer | PARTIAL DONE | Poll ES, enrich body_preview, call Groq, validate semantic JSON, build state v1, call controller | Rule fallback khi LLM fail, schema v2 state builder, memory durable/decay, input summary hygiene |
 | Dummy RL | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime | Real replay buffer, reward, train/evaluate policy |
+| RL state schema | DESIGN APPROVED | Chot `rl_state_v2_16`, protocol de ngoai tensor lam metadata/action-mask context | Migrate code/tests/artifacts/docs command examples tu 24D sang 16D |
 | L4 Drop-and-Catch | NOT STARTED | Disabled safely | SSH/FTP/SMTP data plane, honeypots, reconnect tests |
 | Benchmark/research metrics | NOT STARTED | E2E smoke tests only | RQ metrics, attack drivers, adaptive vs static/rule comparison |
 | Docs | PARTIAL DONE | README/Progress/component READMEs updated | Benchmark docs, design notes, final report alignment |
@@ -70,14 +73,13 @@ Ket qua quan trong:
 Done:
 
 - `adaptive_honeypot_system/control_plane/llm_analyzer/analyzer.py`
-  - Dummy analyzer service.
+  - LLM analyzer service.
   - Polls `honeypot-logs-*`.
-  - Detects web attack subtype by rules.
-  - Builds proposal-compatible 24D state.
-  - Calls routing controller `/decide`.
-  - Does not process old logs before analyzer startup.
-  - Only `real-backend` events create route decisions in dummy milestone.
-  - `EXPOSURE_MODE=attack` hides `/analyze`, docs/OpenAPI, and detailed health stats.
+  - Builds session context from gateway logs and enriches request body from backend/honeypot service logs.
+  - Calls Groq (`GROQ_API_KEY`, default model `llama-3.3-70b-versatile`) for semantic extraction.
+  - Validates/clamps LLM output fields.
+  - Builds current runtime state v1 24D and calls routing controller `/decide`.
+  - `EXPOSURE_MODE=attack` hides docs/OpenAPI and detailed health stats.
 
 - `adaptive_honeypot_system/control_plane/llm_analyzer/test_adaptive_web_flow.sh`
   - E2E Web MVP test for log -> analyzer -> route -> honeypot.
@@ -102,9 +104,9 @@ Done:
 
 Remaining:
 
-- Real LLM analyzer.
-- Redis/in-process memory with decay and session history.
-- Formal state builder package.
+- Rule-based fallback when Groq is unavailable or returns invalid output.
+- Redis or durable memory with decay and session history.
+- Formal state builder package using `rl_state_v2_16`.
 - Real replay buffer extraction and RL evaluation.
 
 ### 4.2 Gateway
@@ -274,7 +276,7 @@ Remaining detail:
 
 ### Phase 3 - Structured logging and observability for AI
 
-Status: PARTIAL DONE, enough for dummy analyzer.
+Status: PARTIAL DONE, enough for analyzer-driven Web MVP.
 
 - [x] Real backend structured JSON logs.
 - [x] Honeypot structured JSON logs.
@@ -305,58 +307,71 @@ Remaining detail:
   - top sessions/IPs by engagement.
   - pipeline latency.
 
-### Phase 4 - Rule-based state builder first, real LLM analyzer later
+### Phase 4 - Formal state builder and LLM fallback
 
 Status: PARTIAL DONE.
 
 Done:
 
-- [x] Dummy analyzer builds 24D state.
-- [x] Rule detection for SQLi/CMDI/SSTI/SSRF exists.
-- [x] LLM disabled/local mode works with no API key.
-- [x] Analyzer skips stale logs on startup.
-- [x] Analyzer does not route based on direct honeypot test logs.
+- [x] Analyzer builds runtime state v1 24D.
+- [x] Groq-backed semantic extraction exists.
+- [x] LLM output validation/clamping exists.
+- [x] Analyzer can read logs from Elasticsearch and call `/decide`.
+- [x] State schema v2 16D has been approved for migration.
 
 Not done:
 
 - [ ] Dedicated `state_builder/` package.
 - [ ] `StateVector` dataclass with named fields and schema version.
 - [ ] Unit tests for state dimension/order.
+- [ ] Runtime migration from `STATE_DIM=24` to `STATE_DIM=16`.
+- [ ] Rule-based fallback that still routes Web attacks when LLM provider is unavailable.
 - [ ] Real session memory.
 - [ ] Redis service or durable memory.
-- [ ] Real LLM provider abstraction.
 - [ ] Strict LLM output schema.
 - [ ] Failure/timeout policy around real LLM calls.
 
-State order to preserve:
+State schema to migrate to: `rl_state_v2_16`
 
-1. protocol_onehot: 4
-2. session_age_norm: 1
-3. interaction_rate_norm: 1
-4. failed_attempts_norm: 1
-5. content_size_anomaly: 1
-6. probe_diversity_norm: 1
-7. effective_category: 4
-8. effective_subtype: 4
-9. effective_evasion: 1
-10. current_route: 1
-11. attack_vector_shift: 1
-12. effective_historical_consistency: 1
-13. effective_progression: 1
-14. memory_decay_weight: 1
-15. effective_shift_velocity: 1
+Protocol is required metadata of `/decide`, not a tensor field. Controller uses it for action masking and protocol-specific normalization.
+
+1. `session_age_norm`
+2. `interaction_rate_norm`
+3. `failed_attempts_norm`
+4. `payload_complexity_norm`
+5. `target_diversity_norm`
+6. `current_route`
+7. `engagement_depth_norm`
+8. `target_sqli_score`
+9. `target_cmdi_score`
+10. `target_ssti_score`
+11. `target_ssrf_score`
+12. `target_credential_attack_score`
+13. `target_enumeration_score`
+14. `evasion_score`
+15. `attack_progression_stage`
+16. `intent_stability_score`
+
+Fields intentionally removed from v1 24D:
+
+- `protocol_onehot`: moved to `/decide` metadata.
+- `attack_category_onehot`: replaced by target-specific scores.
+- `attack_vector_shift`: merged into `intent_stability_score`.
+- `memory_decay_weight`: removed until real decay exists.
+- `llm_confidence`: used to scale LLM-derived fields before tensor construction, logged separately for observability/debug.
 
 ### Phase 5 - Adaptive decision loop end-to-end for Web
 
 Status: DONE for single-attack Web MVP, incomplete for research benchmark.
 
-- [x] Worker service exists in dummy analyzer.
+- [x] Worker service exists in analyzer.
 - [x] Polls Elasticsearch.
-- [x] Builds state.
+- [x] Builds state v1 24D.
 - [x] Calls routing controller.
 - [x] Applies HAProxy session route.
 - [x] `make test-adaptive-web` proves SQLi single-attack route.
 - [x] Route cleanup keeps maps clean after tests.
+- [ ] Migrate adaptive flow to `rl_state_v2_16`.
 - [ ] Multi-attack same session route-shift demo.
 - [ ] Benign-session no-reroute benchmark.
 - [ ] Dry-run report/replay mode.
@@ -482,7 +497,7 @@ Tasks:
 
 - [ ] Tao `tests/` folder.
 - [ ] Add pytest dependencies neu can, giu nhe.
-- [ ] Add `tests/test_state_schema_dummy.py` hoac later `tests/test_state_schema.py`.
+- [ ] Add `tests/test_state_schema.py` for `rl_state_v2_16`.
 - [ ] Add `tests/test_routing_controller_unit.py`.
 - [ ] Add `tests/test_contract_web.py`.
 - [ ] Add Make targets:
@@ -497,31 +512,41 @@ Acceptance:
 - `make validate` van PASS.
 - Invalid backend/L4 disabled behavior duoc test tu dong.
 
-### Step B - Extract formal state builder package
+### Step B - Migrate to `rl_state_v2_16` and extract formal state builder
 
-Goal: tach state logic khoi dummy analyzer de sau nay thay LLM/RL that khong phai sua lung tung.
+Goal: giam state tu 24D xuong 16D, tach state logic khoi analyzer, va khoa schema de train/evaluate RL khong bi lech field order.
 
 Files to create:
 
 - `adaptive_honeypot_system/control_plane/state_builder/__init__.py`
 - `adaptive_honeypot_system/control_plane/state_builder/state_schema.py`
 - `adaptive_honeypot_system/control_plane/state_builder/features.py`
-- `adaptive_honeypot_system/control_plane/state_builder/detectors.py`
 - `adaptive_honeypot_system/control_plane/state_builder/log_query.py`
 
 Tasks:
 
-- [ ] Define `STATE_SCHEMA_VERSION`.
-- [ ] Define field names/ranges for 24D state.
+- [ ] Define `STATE_SCHEMA_VERSION = "rl_state_v2_16"`.
+- [ ] Change `STATE_DIM` from 24 to 16.
+- [ ] Define field names/ranges for 16D state.
 - [ ] Define `StateVector` dataclass.
 - [ ] Implement `to_list()` and `validate_state()`.
-- [ ] Move regex detectors from analyzer to `detectors.py`.
 - [ ] Move feature computation from analyzer to `features.py`.
 - [ ] Analyzer imports state builder instead of owning state construction.
+- [ ] Controller `/decide` accepts optional/required `state_schema` and validates it.
+- [ ] Heuristic policy indexes update:
+  - SQLi score index 7.
+  - CMDi score index 8.
+  - SSTI score index 9.
+  - SSRF score index 10.
+  - credential/enumeration reserved for future L4.
+- [ ] Dummy model generators update to 16D.
+- [ ] Synthetic dataset generator update to 16D.
+- [ ] Test scripts and docs command examples update to 16D payloads.
+- [ ] Keep `protocol` as `/decide` metadata and action-mask context, not state tensor.
 
 Acceptance:
 
-- Unit tests prove exactly 24 floats.
+- Unit tests prove exactly 16 floats.
 - SQLi/CMDI/SSTI/SSRF samples map to highest matching subtype score.
 - Benign samples keep route action normal in heuristic mode.
 - `make test-adaptive-web` still PASS.
@@ -625,15 +650,16 @@ Acceptance:
 - Controller can load generated artifact.
 - README/RL guide explains synthetic vs replay dataset clearly.
 
-### Step F - Real LLM analyzer with safe fallback
+### Step F - Harden Groq LLM analyzer with safe fallback
 
-Goal: them LLM vao dung cho proposal nhung local demo van chay duoc khi khong co API key.
+Goal: giu Groq analyzer dung proposal nhung local demo van chay duoc khi khong co API key hoac provider timeout.
 
 Tasks:
 
-- [ ] Add provider abstraction:
-  - `LLM_PROVIDER=none|openai|gemini`
-  - default `none`.
+- [x] Groq provider integrated in `llm_analyzer`.
+- [ ] Add provider mode/config abstraction if needed:
+  - `LLM_PROVIDER=groq|none`
+  - default safe behavior when key missing.
 - [ ] Define strict LLM input summary, not raw full logs.
 - [ ] Define strict JSON output schema:
   - attack_category
@@ -655,7 +681,7 @@ Tasks:
 
 Acceptance:
 
-- `LLM_PROVIDER=none make test-adaptive-web` PASS.
+- No API key / provider timeout path still routes obvious SQLi/CMDI/SSTI/SSRF through rule-based fallback.
 - With fake/mock LLM provider, output schema validated.
 - Bad LLM JSON falls back to rules and logs error.
 
@@ -773,7 +799,7 @@ Expected: all `False`.
 Current mitigation:
 
 - Analyzer only processes logs newer than analyzer startup time.
-- Analyzer ignores honeypot-service logs for route creation in dummy milestone.
+- Analyzer uses service logs mainly for body enrichment/engagement observation; route creation should be driven by gateway/session context, not direct honeypot port tests.
 - E2E tests clear route maps.
 
 Future work:
@@ -794,24 +820,26 @@ Future work:
 - Add route TTL.
 - Add route owner/test ID metadata if maps grow.
 
-### Risk: dummy LLM/RL overclaims proposal
+### Risk: docs/code overclaim proposal status
 
 Current mitigation:
 
-- Docs call analyzer/policy dummy.
+- Docs distinguish current runtime v1 24D from approved v2 16D migration target.
+- Docs call RL policy heuristic/dummy until replay training/evaluation exists.
 - L4 disabled explicitly.
 
 Future work:
 
 - Add design note: current demo vs full proposal.
 - Benchmark before making research claims.
+- Complete state v2 migration before training/evaluating RL.
 
 ### Risk: LLM makes demo unstable
 
 Required approach:
 
 - Rule-based state builder remains baseline.
-- `LLM_PROVIDER=none` must always work.
+- Missing Groq key / provider timeout must still work for obvious Web attack routing.
 - LLM failure must not break routing controller or request path.
 
 ### Risk: RL optimizes blocking instead of engagement

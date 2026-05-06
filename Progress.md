@@ -1,6 +1,6 @@
 # Báo cáo tiến độ
 
-Cập nhật: 2026-05-07
+Cập nhật: 2026-05-06
 
 ## 1) Tổng quan hiện tại
 
@@ -8,9 +8,10 @@ Dự án đã hoạt động đủ cho data plane + control plane trong web scop
 - Data plane: gateway HAProxy + real backend/frontend + 4 web honeypot.
 - Exposure mode: `debug` cho operator/test, `attack` cho demo attacker-facing.
 - Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
-- RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode.
-- LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) để trích xuất semantic features, dựng state 24D và gọi routing controller bất đồng bộ.
+- RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode. Runtime code hiện vẫn dùng state schema v1 24D.
+- LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) để trích xuất semantic features, dựng state v1 24D và gọi routing controller bất đồng bộ.
 - Observability: Filebeat -> Elasticsearch -> Kibana hoạt động. Service-level syslog forwarding thu thập HTTP request body từ backend/honeypot.
+- Thiết kế state tiếp theo đã chốt: `rl_state_v2_16`, giảm từ 24D xuống 16D, giữ `protocol` ngoài tensor làm metadata của `/decide` để mở rộng SSH/FTP/SMTP bằng action masking.
 
 Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ, không chặn request path.
 
@@ -24,7 +25,7 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
   - `/api/tools/fetch` -> SSRF
   - `/api/articles/search` -> SQLI
 - [x] `/api/health` route riêng về real backend (`health_api`).
-- [x] `EXPOSURE_MODE=debug|attack`: debug mode giu endpoint/metadata test; attack mode an service identity, `/routes`, `/analyze`, docs/OpenAPI, HAProxy Stats UI.
+- [x] `EXPOSURE_MODE=debug|attack`: debug mode giu endpoint/metadata test; attack mode an service identity, `/routes`, docs/OpenAPI, HAProxy Stats UI. Analyzer debug endpoint `/analyze` khong con trong source hien tai.
 - [x] Session map steering và source-IP map steering qua `routing_update.sh`.
 - [x] Real backend có `POST /api/articles/search` để khớp SQLI honeypot contract.
 - [x] Gỡ config HAProxy legacy không dùng (`gateway/haproxy.cfg`) để tránh nhầm lẫn.
@@ -38,7 +39,8 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] Thêm route inspection API: `/routes`, `GET /route/session/{sid}`, `GET /route/ip/{ip}`.
 - [x] Thêm route cleanup API `DELETE /routes` và Make target `make clear-routes`.
 - [x] Chặn non-HTTP/L4 placeholder khi `L4_ROUTING_ENABLED=false`.
-- [x] Thêm dummy `llm_analyzer` service (`/health`, `/analyze`) cho flow `log -> state -> decide -> route`.
+- [x] Thêm `llm_analyzer` service (`/health`) cho flow `log -> state -> decide -> route`.
+- [ ] Migrate runtime từ state v1 24D sang `rl_state_v2_16`.
 - [x] Split-IP E2E `test_two_ip_split_routing.sh` pass (1 IP honeypot, 1 IP backend thật).
 
 ### Logging pipeline
@@ -55,6 +57,29 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] System prompt trích xuất 8-field semantic output: `attack_category`, `web_subtype_scores`, `evasion_score`, `historical_intent_consistency`, `attack_progression_stage`, `intent_shift_velocity`, `llm_confidence`, `updated_memory_context`.
 - [x] Validation + clamping output fields về [0, 1], graceful degradation khi LLM lỗi.
 - [x] E2E verified: CMDi payload (`127.0.0.1; cat /etc/passwd`) → LLM detect cmdi (score 0.8) → route `test-llm-groq` → `cmdi_api` → request tiếp theo trên session đó đi vào honeypot.
+- [ ] Bổ sung fallback rule-based khi thiếu `GROQ_API_KEY` hoặc LLM timeout để adaptive flow vẫn chạy được.
+- [ ] Không log full `llm_input_preview` chứa body/payload nhạy cảm trong demo attack-facing.
+
+### RL state schema
+- [x] Chốt hướng giảm chiều: state v2 16D, `protocol` là metadata ngoài tensor.
+- [x] Chốt các field v2:
+  - `session_age_norm`
+  - `interaction_rate_norm`
+  - `failed_attempts_norm`
+  - `payload_complexity_norm`
+  - `target_diversity_norm`
+  - `current_route`
+  - `engagement_depth_norm`
+  - `target_sqli_score`
+  - `target_cmdi_score`
+  - `target_ssti_score`
+  - `target_ssrf_score`
+  - `target_credential_attack_score`
+  - `target_enumeration_score`
+  - `evasion_score`
+  - `attack_progression_stage`
+  - `intent_stability_score`
+- [ ] Migrate `agent.py`, `routing_controller/main.py`, `llm_analyzer/analyzer.py`, dummy model scripts, synthetic data generator và test commands sang `STATE_DIM = 16`.
 
 ### Test harness
 - [x] `test_honeypots.py` ở root repo hoạt động ổn định.
@@ -89,7 +114,7 @@ Kết quả:
 - [x] `make test-routes` PASS.
 - [x] `make test-honeypots` PASS.
 - [x] `make test-rl-split-ip` PASS (Client A -> `ssti-honeypot`, Client B -> `real-backend`).
-- [x] `make test-adaptive-web` PASS (`log -> dummy analyzer -> dummy RL/controller -> HAProxy session route -> SQLI honeypot`).
+- [x] `make test-adaptive-web` PASS ở milestone dummy/heuristic trước đó (`log -> analyzer -> controller -> HAProxy session route -> SQLI honeypot`).
 - [x] `make validate` PASS (syntax check, routing controller health, honeypot tests, core route smoke).
 - [x] Route maps sạch sau E2E (`session_routes={}`, `ip_routes={}`).
 
@@ -107,7 +132,9 @@ Kết quả:
 
 ## 6) Việc còn lại
 
-- [x] ~~Thay dummy `llm_analyzer` bằng LLM analyzer thật có memory/stateful analysis.~~
+- [x] ~~Thay dummy `llm_analyzer` bằng LLM analyzer gọi provider thật.~~
+- [ ] Hoàn thiện fallback/stability cho LLM analyzer để thiếu API key vẫn chạy được demo adaptive.
+- [ ] Migrate state v1 24D sang `rl_state_v2_16`.
 - [ ] Thay dummy policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
 - [ ] Hoàn thiện benchmark (route accuracy, false reroute, engagement).
 - [ ] Hoàn thiện L4 SSH/FTP/SMTP Drop-and-Catch nếu còn trong scope demo.

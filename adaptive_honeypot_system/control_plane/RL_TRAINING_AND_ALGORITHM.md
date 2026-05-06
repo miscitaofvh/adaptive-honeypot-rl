@@ -9,19 +9,19 @@ Tài liệu này mô tả:
 
 Stack tuân theo kiến trúc đề xuất:
 - Data plane (`gateway` + các service) phục vụ request trực tiếp.
-- Control plane (`routing_controller`, RL model, và sau này là LLM analyzer) cập nhật route map bất đồng bộ.
+- Control plane (`llm_analyzer`, `routing_controller`, RL model/runtime policy) cập nhật route map bất đồng bộ.
 
 Không có phụ thuộc đồng bộ từ request path vào inference của control plane,
 nên traffic web không bị chặn khi control plane chậm hoặc restart.
 
 ## 1) Phạm vi component
 
-Phạm vi control plane hiện tại (chưa tính LLM analyzer):
+Phạm vi control plane hiện tại:
 - `control_plane/rl_agent/generate_fake_data.py`
 - `control_plane/rl_agent/train_offline.py`
 - `control_plane/rl_agent/agent.py`
 - `control_plane/routing_controller/main.py`
-- `control_plane/llm_analyzer/analyzer.py` (dummy analyzer cho Web MVP, chưa phải LLM thật)
+- `control_plane/llm_analyzer/analyzer.py` (poll Elasticsearch, gọi Groq khi có key, dựng state runtime hiện tại và gọi `/decide`)
 
 `routing_controller` đã được wiring trong `docker-compose.yml`.
 
@@ -36,9 +36,37 @@ Phạm vi control plane hiện tại (chưa tính LLM analyzer):
 ## 3) Thiết kế state và action
 
 ### State
-- Vector cố định 24 chiều (`STATE_DIM = 24`), đồng bộ với proposal.
-- Gồm protocol one-hot, metrics session, payload signals, routing state, semantic-like features.
-- Generator dataset hiện tại mô phỏng các trường này (chưa phụ thuộc LLM).
+- Runtime code hiện tại vẫn dùng vector v1 24 chiều (`STATE_DIM = 24`) trong `agent.py`, `routing_controller`, analyzer và generator.
+- Thiết kế tiếp theo đã chốt là `rl_state_v2_16`: giảm xuống 16 chiều, thực tiễn hơn cho Web MVP nhưng vẫn mở rộng được SSH/FTP/SMTP.
+- `protocol` không nằm trong tensor v2. Nó là metadata bắt buộc của `/decide`, dùng cho action masking và normalizer profile theo giao thức.
+
+Schema target v2:
+
+```text
+0  session_age_norm
+1  interaction_rate_norm
+2  failed_attempts_norm
+3  payload_complexity_norm
+4  target_diversity_norm
+5  current_route
+6  engagement_depth_norm
+7  target_sqli_score
+8  target_cmdi_score
+9  target_ssti_score
+10 target_ssrf_score
+11 target_credential_attack_score
+12 target_enumeration_score
+13 evasion_score
+14 attack_progression_stage
+15 intent_stability_score
+```
+
+Các trường bị bỏ khỏi v1 24D:
+- `protocol_onehot`: chuyển thành metadata.
+- `attack_category_onehot`: thay bằng target-specific scores.
+- `attack_vector_shift`: merge vào `intent_stability_score`.
+- `memory_decay_weight`: bỏ cho tới khi có decay thật.
+- `llm_confidence`: dùng để scale các field LLM trước khi build tensor, log riêng để debug.
 
 ### Action space
 Định nghĩa trong `agent.py`:
@@ -65,7 +93,8 @@ Mask được enforce bởi `allowed_action_indices()` khi inference và khi tí
 Implementation hiện tại là offline Q-learning với mô hình tuyến tính trên PyTorch:
 
 - Mô hình: `Q(s, a) = w_a^T s + b_a`
-- Kiến trúc: `nn.Linear(24, 8)`
+- Kiến trúc runtime hiện tại: `nn.Linear(24, 8)` / JSON linear weights 24D.
+- Kiến trúc sau migration v2: `nn.Linear(16, 8)` / JSON linear weights 16D.
 - Tối ưu: `AdamW` + weight decay (`l2`) + gradient clipping.
 - Loss: `MSE(Q(s,a), target)`.
 
@@ -241,6 +270,18 @@ Mong đợi:
 - Controller trả về `action_name` và `backend`.
 - Nếu `apply_route=true`, map sẽ được cập nhật qua `routing_update.sh`.
 
+Lưu ý: payload trên là ví dụ cho runtime hiện tại 24D. Sau khi migrate sang `rl_state_v2_16`, payload test tương đương sẽ là:
+
+```json
+{
+  "state_schema": "rl_state_v2_16",
+  "protocol": "http",
+  "session_id": "sid_demo_001",
+  "apply_route": true,
+  "state": [0.2,0.8,0.7,0.6,0.4,0,0,0.9,0.05,0.03,0.02,0,0,0.7,0.5,0.9]
+}
+```
+
 ### Xóa route test thủ công
 
 ```bash
@@ -268,20 +309,22 @@ make test-adaptive-web
 
 Script sẽ:
 - Ép gateway về normal-first mode.
-- Chạy dummy analyzer và routing controller ở `RL_POLICY_MODE=heuristic`.
+- Chạy analyzer và routing controller ở `RL_POLICY_MODE=heuristic`.
 - Gửi SQLi-like payload vào real backend search endpoint.
-- Đợi analyzer poll Elasticsearch, dựng state 24D và gọi `/decide`.
+- Đợi analyzer poll Elasticsearch, dựng state runtime hiện tại và gọi `/decide`.
 - Xác nhận request tiếp theo cùng `sid` được route sang SQLi honeypot.
 
 ## 10) Giới hạn hiện tại
 
-- `llm_analyzer` hiện là dummy/rule-based analyzer; LLM thật và memory/stateful analysis vẫn chưa implement.
+- `llm_analyzer` đã gọi Groq khi có key, nhưng fallback khi provider lỗi/thiếu key chưa đủ chắc.
+- Runtime state vẫn là v1 24D; migration sang `rl_state_v2_16` chưa implement.
 - Mô hình hiện tại là linear Q approximation, chưa phải DQN/BCQ đầy đủ.
 - Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
 - Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.
 
 ## 11) Hướng phát triển tiếp
 
-- Nối state builder thật từ pipeline LLM/log.
+- Migrate state builder từ v1 24D sang `rl_state_v2_16`.
+- Bổ sung rule fallback cho LLM analyzer.
 - Train trên replay buffer tách từ traffic logs.
 - Thêm integration test đầy đủ: `log ingest -> state build -> RL decide -> routing update`.
