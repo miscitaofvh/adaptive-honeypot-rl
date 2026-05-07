@@ -20,6 +20,7 @@ Phạm vi control plane hiện tại:
 - `control_plane/rl_agent/generate_fake_data.py`
 - `control_plane/rl_agent/train_offline.py`
 - `control_plane/rl_agent/agent.py`
+- `control_plane/rl_agent/service.py` (Torch RL service rieng cho debug/export/one-epoch proxy train)
 - `control_plane/routing_controller/main.py`
 - `control_plane/llm_analyzer/analyzer.py` (poll Elasticsearch, gọi Groq khi có key, dựng state runtime hiện tại và gọi `/decide`)
 
@@ -27,9 +28,10 @@ Phạm vi control plane hiện tại:
 
 ## 2) Chính sách phụ thuộc (quan trọng)
 
-- PyTorch chỉ dùng để train offline trên máy local.
-- Tuyệt đối không cài `torch` trong Docker runtime của hệ thống.
+- PyTorch chỉ dùng để train offline trên máy local và trong service riêng `rl_agent`.
+- Không cài `torch` trong `routing_controller`, real service, honeypots, gateway hoặc analyzer.
 - Runtime controller chỉ đọc JSON weights (`LinearQAgent`) và không phụ thuộc torch.
+- `rl_agent` container có Torch để demo/debug/export model artifact, nhưng không nằm trên request path.
 - Web MVP có thể chạy `RL_POLICY_MODE=heuristic` để dùng dummy subtype-based policy mà không cần model artifact.
 - Yêu cầu local để train: `control_plane/rl_agent/requirements-local.txt`.
 
@@ -104,6 +106,8 @@ Target cho từng transition `(s, a, r, s', done)`:
 
 Sau khi train, model được export về JSON (`weights`, `bias`) để runtime controller sử dụng.
 
+Torch RL service hiện tại dùng cùng kiến trúc `nn.Linear(16, 8)`. Mặc định service khởi tạo `web_policy` deterministic theo subtype score để giữ demo ổn định. Endpoint debug `/train/one-epoch` chỉ chạy một proxy epoch nhỏ trên vài sample cố định; đây không phải full train và không đại diện chất lượng policy thật.
+
 ## 5) Setup môi trường train local
 
 Từ root repo:
@@ -175,6 +179,18 @@ Tạo dummy web policy model theo subtype `[sqli, cmdi, ssti, ssrf]`:
 make make-dummy-web-model
 ```
 
+Export artifact từ Torch RL service:
+
+```bash
+make rl-agent-export
+```
+
+Chạy một proxy epoch rất nhỏ rồi export artifact:
+
+```bash
+make rl-agent-one-epoch
+```
+
 Artifact mong đợi:
 - `control_plane/rl_agent/artifacts/rl_agent_linear.json`
 - `control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json`
@@ -190,6 +206,7 @@ python -m py_compile \
   control_plane/rl_agent/agent.py \
   control_plane/rl_agent/generate_fake_data.py \
   control_plane/rl_agent/train_offline.py \
+  control_plane/rl_agent/service.py \
   control_plane/routing_controller/main.py
 ```
 
@@ -222,15 +239,33 @@ Endpoint routing controller:
 curl -s http://localhost:8001/health | jq .
 ```
 
-### Kiểm tra torch không có trong container runtime
+### Kiểm tra Torch chỉ có trong `rl_agent`
 
 ```bash
 docker compose exec routing_controller python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 docker compose exec backend python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 docker compose exec cmdi_pot python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
+docker compose exec rl_agent python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 ```
 
-Kết quả mong đợi: đều `False`.
+Kết quả mong đợi: `routing_controller`, `backend`, `cmdi_pot` đều `False`; riêng `rl_agent` là `True`.
+
+### Test Torch RL service
+
+```bash
+curl -s http://localhost:8003/health | jq .
+
+curl -s -X POST http://localhost:8003/predict \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "state_schema": "rl_state_v2_16",
+    "protocol": "http",
+    "state": [0,0,0,0,0,0,0,0.9,0.05,0.05,0.05,0,0,0.2,0.4,0.8]
+  }' | jq .
+
+curl -s -X POST http://localhost:8003/export | jq .
+curl -s -X POST http://localhost:8001/model/reload | jq .
+```
 
 ### Reload model sau khi train
 
@@ -287,7 +322,7 @@ Script sẽ:
 - Tạo dummy model và reload.
 - Tạo 2 container client tạm (IP khác nhau).
 - Chỉ apply route cho client A qua `POST /decide` với `source_ip`.
-- Kiểm tra kết quả split: A => `ssti-honeypot`, B => `real-backend`.
+- Kiểm tra route theo endpoint: preview của A => `ssti-honeypot`; health/ping của A và traffic của B vẫn về `real-backend`.
 
 ### End-to-end adaptive web test
 
@@ -306,7 +341,7 @@ Script sẽ:
 
 - `llm_analyzer` đã gọi Groq khi có key và có rule fallback khi provider lỗi/thiếu key; phần còn lại là provider abstraction, retry/backoff, và memory decay.
 - Runtime state đã là `rl_state_v2_16`.
-- Mô hình hiện tại là linear Q approximation, chưa phải DQN/BCQ đầy đủ.
+- Mô hình hiện tại là linear Q approximation/Torch stub, chưa phải DQN/BCQ đầy đủ.
 - Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
 - Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.
 

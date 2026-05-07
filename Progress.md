@@ -1,6 +1,6 @@
 # Báo cáo tiến độ
 
-Cập nhật: 2026-05-06
+Cập nhật: 2026-05-07
 
 ## 1) Tổng quan hiện tại
 
@@ -8,7 +8,7 @@ Dự án đã hoạt động đủ cho data plane + control plane trong web scop
 - Data plane: gateway HAProxy + real backend/frontend + 4 web honeypot.
 - Exposure mode: `debug` cho operator/test, `attack` cho demo attacker-facing.
 - Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
-- RL: đã tách rõ train offline (local) và runtime inference (container); Web MVP có thêm dummy heuristic RL mode. Runtime code đã migrate sang `rl_state_v2_16`.
+- RL: đã tách rõ controller inference không Torch, train offline local, và `rl_agent` Torch service riêng cho debug/export/one-epoch proxy train. Web MVP có dummy heuristic RL mode. Runtime code đã migrate sang `rl_state_v2_16`.
 - LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) hoặc rule fallback để trích xuất semantic features, dựng state v2 16D và gọi routing controller bất đồng bộ.
 - Observability: Filebeat -> Elasticsearch -> Kibana hoạt động. Service-level syslog forwarding thu thập HTTP request body từ backend/honeypot.
 - State hiện tại: `rl_state_v2_16`, giảm từ 24D xuống 16D, giữ `protocol` ngoài tensor làm metadata của `/decide` để mở rộng SSH/FTP/SMTP bằng action masking.
@@ -26,22 +26,24 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
   - `/api/articles/search` -> SQLI
 - [x] `/api/health` route riêng về real backend (`health_api`).
 - [x] `EXPOSURE_MODE=debug|attack`: debug mode giu endpoint/metadata test; attack mode an service identity, `/routes`, docs/OpenAPI, HAProxy Stats UI. Analyzer debug endpoint `/analyze` khong con trong source hien tai.
-- [x] Session map steering và source-IP map steering qua `routing_update.sh`.
+- [x] Session map steering và source-IP map steering qua `routing_update.sh`, đã scope theo đúng API surface để không làm hỏng API khác cùng session.
 - [x] Real backend có `POST /api/articles/search` để khớp SQLI honeypot contract.
 - [x] Gỡ config HAProxy legacy không dùng (`gateway/haproxy.cfg`) để tránh nhầm lẫn.
 
 ### Control plane + RL
 - [x] `routing_controller` expose `/decide`; cac API operator nhu `/model/reload`, add/remove route, inspect route map chi bat trong debug mode.
 - [x] Refactor train offline sang PyTorch trong `train_offline.py`.
-- [x] Thêm `requirements-local.txt` cho train local (`torch` local-only).
-- [x] Runtime controller vẫn dùng JSON linear weights (`LinearQAgent`), không cần torch trong container.
+- [x] Thêm `requirements-local.txt` cho train local, tách khỏi requirements của controller/request-path services.
+- [x] Runtime controller vẫn dùng JSON linear weights (`LinearQAgent`), không cần torch trong controller container.
 - [x] Thêm `RL_POLICY_MODE=heuristic` làm dummy RL policy cho Web MVP.
+- [x] Thêm `rl_agent` service dùng Torch trên port `8003`, chạy debug/attack mode, hỗ trợ `/predict`, `/export`, `/train/one-epoch`.
+- [x] `rl_agent` export artifact JSON tương thích controller (`rl_agent_linear.json`) mà không full train.
 - [x] Thêm route inspection API: `/routes`, `GET /route/session/{sid}`, `GET /route/ip/{ip}`.
 - [x] Thêm route cleanup API `DELETE /routes` và Make target `make clear-routes`.
 - [x] Chặn non-HTTP/L4 placeholder khi `L4_ROUTING_ENABLED=false`.
 - [x] Thêm `llm_analyzer` service (`/health`) cho flow `log -> state -> decide -> route`.
 - [x] Migrate runtime từ state v1 24D sang `rl_state_v2_16`.
-- [x] Split-IP E2E `test_two_ip_split_routing.sh` pass (1 IP honeypot, 1 IP backend thật).
+- [x] Split-IP E2E `test_two_ip_split_routing.sh` pass với route honeypot theo endpoint, không route toàn bộ API của IP.
 
 ### Logging pipeline
 - [x] Filebeat `drop_fields` loại bỏ metadata thừa (`agent`, `host`, `ecs`, `syslog`, `process`, v.v.) — ELK chỉ còn `@timestamp` + `app.*`.
@@ -97,9 +99,12 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 Đã chạy trong thư mục `adaptive_honeypot_system/`:
 
 ```bash
-docker compose ps -a
+docker compose ps
 curl -s http://localhost:8001/health
+curl -s http://localhost:8003/health
 curl -s http://localhost:18080/api/health
+make rl-agent-export
+make rl-agent-one-epoch
 make test-routes
 make test-honeypots
 make test-rl-split-ip
@@ -110,18 +115,21 @@ make validate
 Kết quả:
 - [x] Tất cả service Up.
 - [x] Routing controller health PASS.
+- [x] Torch RL agent health/predict/export/one-epoch PASS.
+- [x] Controller `RL_POLICY_MODE=model` smoke với artifact do `rl_agent` export PASS (`ROUTE_SQLI -> sqli_api`).
+- [x] Attack mode hiding của `rl_agent` PASS (`/predict`, `/docs` 404).
 - [x] Gateway `/api/health` PASS (`real-backend`).
 - [x] `make test-routes` PASS.
 - [x] `make test-honeypots` PASS.
 - [x] `make test-rl-split-ip` PASS (Client A -> `ssti-honeypot`, Client B -> `real-backend`).
-- [x] `make test-adaptive-web` PASS ở milestone dummy/heuristic trước đó (`log -> analyzer -> controller -> HAProxy session route -> SQLI honeypot`).
+- [x] `make test-adaptive-web` PASS (`log -> analyzer -> controller -> HAProxy session route -> SQLI honeypot`).
 - [x] `make validate` PASS (syntax check, routing controller health, honeypot tests, core route smoke).
 - [x] Route maps sạch sau E2E (`session_routes={}`, `ip_routes={}`).
 
 ## 4) Ràng buộc đã xác minh
 
-- [x] Không cài `torch` trong Docker runtime services (`routing_controller`, `backend`, `honeypots`).
-- [x] `torch` chỉ dùng local để train offline.
+- [x] Không cài `torch` trong Docker request-path services (`routing_controller`, `backend`, `honeypots`).
+- [x] `torch` chỉ dùng local để train offline và trong service riêng `rl_agent`.
 - [x] Chưa test lại full benchmark train thật vì hiện chưa có dataset thật.
 
 ## 5) Lưu ý vận hành
@@ -133,9 +141,9 @@ Kết quả:
 ## 6) Việc còn lại
 
 - [x] ~~Thay dummy `llm_analyzer` bằng LLM analyzer gọi provider thật.~~
-- [ ] Hoàn thiện fallback/stability cho LLM analyzer để thiếu API key vẫn chạy được demo adaptive.
+- [x] Hoàn thiện fallback rule-based để thiếu API key/provider lỗi vẫn chạy được demo adaptive rõ ràng.
 - [x] Migrate state v1 24D sang `rl_state_v2_16`.
-- [ ] Thay dummy policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
+- [ ] Thay dummy/Torch stub policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
 - [ ] Hoàn thiện benchmark (route accuracy, false reroute, engagement).
 - [ ] Hoàn thiện L4 SSH/FTP/SMTP Drop-and-Catch nếu còn trong scope demo.
   

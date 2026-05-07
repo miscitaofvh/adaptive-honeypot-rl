@@ -67,6 +67,7 @@ make mode-debug
 curl -s http://localhost:18080/api/health
 curl -s http://localhost:8001/routes
 curl -s http://localhost:8002/health
+curl -s http://localhost:8003/health
 ```
 
 Attack-facing mode dùng khi demo dưới góc nhìn user/attacker:
@@ -82,6 +83,7 @@ Expected trong attack mode:
 
 - `/api/health` chỉ trả `{"status":"ok"}`.
 - `/routes`, `/route/...`, `/model/reload`, `/docs`, `/openapi.json` trả `404`.
+- RL agent debug endpoints như `/predict`, `/export`, `/model/info`, `/train/one-epoch` cũng trả `404`.
 - Analyzer debug injection endpoint `/analyze` đã không còn trong source hiện tại; manual test nên đi qua request thật và log pipeline.
 - HAProxy Stats UI trên `:8404/stats` bị tắt ở runtime.
 - `/decide` vẫn được giữ cho analyzer nội bộ, không dùng như endpoint demo public.
@@ -98,6 +100,7 @@ make mode-debug
 - HAProxy stats: `http://localhost:8404/stats`
 - Routing controller: `http://localhost:8001`
 - LLM analyzer: `http://localhost:8002`
+- Torch RL agent: `http://localhost:8003`
 - Elasticsearch: `http://localhost:9200`
 - Kibana: `http://localhost:5601`
 - CMDI honeypot direct: `http://localhost:5002`
@@ -132,7 +135,78 @@ Chạy split-IP routing test:
 make test-rl-split-ip
 ```
 
-## 5) Frontend smoke tests
+Export Torch RL artifact dùng cho controller model mode:
+
+```bash
+make rl-agent-export
+```
+
+Chạy một proxy epoch nhỏ rồi export artifact:
+
+```bash
+make rl-agent-one-epoch
+```
+
+## 5) Torch RL agent tests
+
+RL agent là service debug/operator riêng, không nằm trên request path.
+
+Health:
+
+```bash
+curl -s http://localhost:8003/health
+```
+
+Predict HTTP SQLi-like state trong debug mode:
+
+```bash
+curl -s -X POST http://localhost:8003/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "state_schema": "rl_state_v2_16",
+    "protocol": "http",
+    "state": [0,0,0,0,0,0,0,0.9,0.05,0.05,0.05,0,0,0.2,0.4,0.8]
+  }'
+```
+
+Expected:
+
+- `action_name` là `ROUTE_SQLI`.
+- `backend` là `sqli_api`.
+
+Export model JSON artifact:
+
+```bash
+curl -s -X POST http://localhost:8003/export
+ls -l control_plane/rl_agent/artifacts/rl_agent_linear.json
+curl -s -X POST http://localhost:8001/model/reload
+```
+
+One tiny proxy epoch, không phải full train:
+
+```bash
+curl -s -X POST http://localhost:8003/train/one-epoch \
+  -H "Content-Type: application/json" \
+  -d '{"learning_rate":0.01,"export_after":true}'
+```
+
+Attack mode hiding:
+
+```bash
+make mode-attack
+curl -s http://localhost:8003/health
+curl -i -X POST http://localhost:8003/predict \
+  -H "Content-Type: application/json" \
+  -d '{"state_schema":"rl_state_v2_16","protocol":"http","state":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}'
+make mode-debug
+```
+
+Expected:
+
+- `/health` chỉ trả `{"status":"ok"}`.
+- `/predict` trả `404`.
+
+## 6) Frontend smoke tests
 
 Frontend được phục vụ qua gateway trên port `18080`.
 
@@ -148,7 +222,7 @@ Expected:
 - HTTP `200`.
 - `Content-Type: text/html`.
 
-## 6) Real backend tests through gateway
+## 7) Real backend tests through gateway
 
 Chuyển gateway sang normal mode:
 
@@ -256,7 +330,7 @@ curl -s -X POST "http://localhost:18080/api/articles" \
 
 Lưu ý: command trên tạo data trong SQLite volume. Nếu chỉ test nhanh, nên xóa record bằng shell DB riêng hoặc reset volume khi cần.
 
-## 7) Honeypot direct-port tests
+## 8) Honeypot direct-port tests
 
 Direct ports bỏ qua HAProxy, dùng để test từng honeypot riêng.
 
@@ -330,7 +404,7 @@ Expected:
 - HTTP `200`.
 - Body `content` contains fake cloud metadata such as `instanceId`.
 
-## 8) Honeypot mode through gateway
+## 9) Honeypot mode through gateway
 
 Honeypot mode route API traffic qua HAProxy endpoint mapping:
 
@@ -398,7 +472,7 @@ make mode-normal
 make clear-routes
 ```
 
-## 9) Adaptive flow manual test
+## 10) Adaptive flow manual test
 
 Phần này kiểm tra main project flow:
 
@@ -440,7 +514,7 @@ curl -s -X POST "http://localhost:18080/api/articles/search" \
 
 Request đầu tiên dự kiến sẽ đi tới real backend. Analyzer chạy bất đồng bộ.
 
-Lưu ý: code hiện tại gọi Groq. Nếu thiếu `GROQ_API_KEY` hoặc provider timeout, fallback rule-based chưa hoàn chỉnh nên route có thể không xuất hiện. Đây là hạng mục cần sửa trước khi coi demo ổn định 100%.
+Lưu ý: code hiện tại gọi Groq khi có `GROQ_API_KEY`. Nếu thiếu key hoặc provider timeout, analyzer dùng rule-based fallback để các SQLi/CMDI/SSTI/SSRF rõ ràng vẫn có thể route.
 
 Kiểm tra session route:
 
@@ -468,6 +542,7 @@ Kết quả mong đợi:
 - HTTP `500`.
 - Body contains `"DatabaseError"`.
 - Điều này có nghĩa request thứ hai đã được route tới SQLI honeypot.
+- Cùng `sid`, các API không phải search như markdown preview, ping, fetch vẫn đi real service trong normal-first mode.
 
 Cleanup:
 
@@ -476,7 +551,7 @@ make clear-routes
 curl -s http://localhost:8001/routes
 ```
 
-## 10) Logs while testing
+## 11) Logs while testing
 
 All logs:
 
@@ -508,6 +583,12 @@ Analyzer + routing controller:
 make logs-analyzer
 ```
 
+Torch RL agent:
+
+```bash
+make logs-rl-agent
+```
+
 SIEM stack:
 
 ```bash
@@ -523,7 +604,7 @@ docker compose logs --tail=80 llm_analyzer routing_controller
 docker compose logs --tail=80 cmdi_pot sqli_pot ssti_pot ssrf_pot
 ```
 
-## 11) Elasticsearch checks
+## 12) Elasticsearch checks
 
 List indices:
 
@@ -559,7 +640,7 @@ curl -s -X POST "http://localhost:9200/honeypot-logs-*/_search" \
   }'
 ```
 
-## 12) Common cleanup
+## 13) Common cleanup
 
 Clear adaptive routes:
 
@@ -587,7 +668,7 @@ docker compose down -v
 
 Cảnh báo: `down -v` xóa Docker volumes, bao gồm dữ liệu SQLite của backend và dữ liệu Elasticsearch.
 
-## 13) Expected demo sequence
+## 14) Expected demo sequence
 
 Để demo thủ công sạch:
 

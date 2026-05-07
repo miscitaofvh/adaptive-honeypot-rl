@@ -1,13 +1,14 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model clear-routes test-rl-split-ip test-adaptive-web validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model rl-agent-export rl-agent-one-epoch clear-routes test-rl-split-ip test-adaptive-web validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
 PROJECT_NAME := adaptive-honeypot-rl
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 GATEWAY_URL := http://localhost:18080
+RL_AGENT_URL := http://localhost:8003
 RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
-EXPOSURE_SERVICES := gateway backend cmdi_pot sqli_pot ssti_pot ssrf_pot routing_controller llm_analyzer
+EXPOSURE_SERVICES := gateway backend cmdi_pot sqli_pot ssti_pot ssrf_pot routing_controller llm_analyzer rl_agent
 
 # Colors for output
 CYAN := \033[0;36m
@@ -50,6 +51,7 @@ help:
 	@echo "  $(CYAN)logs-ssti$(RESET)          Show SSTI honeypot logs"
 	@echo "  $(CYAN)logs-ssrf$(RESET)          Show SSRF honeypot logs"
 	@echo "  $(CYAN)logs-siem$(RESET)          Show Elasticsearch & Kibana logs"
+	@echo "  $(CYAN)logs-rl-agent$(RESET)      Show Torch RL agent logs"
 	@echo ""
 	@echo "$(YELLOW)TESTING:$(RESET)"
 	@echo "  $(CYAN)test-api$(RESET)           Test API endpoint (/api/health)"
@@ -67,6 +69,8 @@ help:
 	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model end-to-end"
 	@echo "  $(CYAN)make-dummy-model$(RESET)   Build deterministic dummy model (always SSTI for HTTP)"
 	@echo "  $(CYAN)make-dummy-web-model$(RESET) Build deterministic subtype-based web dummy model"
+	@echo "  $(CYAN)rl-agent-export$(RESET)    Export Torch RL service model artifact"
+	@echo "  $(CYAN)rl-agent-one-epoch$(RESET) Run one tiny Torch epoch and export artifact"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -155,6 +159,9 @@ logs-siem:
 
 logs-analyzer:
 	@$(DOCKER_COMPOSE) logs -f llm_analyzer routing_controller
+
+logs-rl-agent:
+	@$(DOCKER_COMPOSE) logs -f rl_agent
 
 ## Mode switching
 mode-normal:
@@ -313,6 +320,32 @@ make-dummy-web-model:
 	@echo "$(CYAN)[Creating deterministic web subtype routing model...]$(RESET)"
 	@python control_plane/rl_agent/create_dummy_web_policy_model.py --output $(RL_MODEL)
 
+rl-agent-export:
+	@echo "$(CYAN)[Exporting Torch RL agent artifact...]$(RESET)"
+	@$(DOCKER_COMPOSE) up -d --build rl_agent
+	@for i in $$(seq 1 30); do \
+		curl -fsS $(RL_AGENT_URL)/health >/dev/null 2>&1 && break; \
+		if [ "$$i" = "30" ]; then echo "$(RED)RL agent did not become ready$(RESET)"; exit 1; fi; \
+		sleep 1; \
+	done
+	@curl -fsS $(RL_AGENT_URL)/health | grep -q '"exposure_mode":"debug"' || \
+		(echo "$(RED)RL agent export requires EXPOSURE_MODE=debug. Run: make mode-debug$(RESET)"; exit 1)
+	@curl -fsS -X POST $(RL_AGENT_URL)/export | (jq . 2>/dev/null || cat)
+
+rl-agent-one-epoch:
+	@echo "$(CYAN)[Running one tiny Torch RL epoch and exporting artifact...]$(RESET)"
+	@$(DOCKER_COMPOSE) up -d --build rl_agent
+	@for i in $$(seq 1 30); do \
+		curl -fsS $(RL_AGENT_URL)/health >/dev/null 2>&1 && break; \
+		if [ "$$i" = "30" ]; then echo "$(RED)RL agent did not become ready$(RESET)"; exit 1; fi; \
+		sleep 1; \
+	done
+	@curl -fsS $(RL_AGENT_URL)/health | grep -q '"exposure_mode":"debug"' || \
+		(echo "$(RED)RL agent one-epoch requires EXPOSURE_MODE=debug. Run: make mode-debug$(RESET)"; exit 1)
+	@curl -fsS -X POST $(RL_AGENT_URL)/train/one-epoch \
+		-H "Content-Type: application/json" \
+		-d '{"learning_rate":0.01,"export_after":true}' | (jq . 2>/dev/null || cat)
+
 test-rl-split-ip:
 	@echo "$(CYAN)[Running split IP routing test via routing controller...]$(RESET)"
 	@bash control_plane/routing_controller/test_two_ip_split_routing.sh
@@ -342,6 +375,7 @@ validate:
 		control_plane/rl_agent/agent.py \
 		control_plane/rl_agent/generate_fake_data.py \
 		control_plane/rl_agent/train_offline.py \
+		control_plane/rl_agent/service.py \
 		control_plane/rl_agent/create_dummy_ssti_model.py \
 		control_plane/rl_agent/create_dummy_web_policy_model.py \
 		control_plane/routing_controller/main.py \

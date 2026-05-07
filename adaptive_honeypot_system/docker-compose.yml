@@ -129,8 +129,31 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # CONTROL PLANE - RL Routing Controller
+  # CONTROL PLANE - RL Agent + Routing Controller
   # ============================================================
+  rl_agent:
+    build:
+      context: .
+      dockerfile: control_plane/rl_agent/Dockerfile
+    container_name: adaptive-rl-agent
+    ports:
+      - "8003:8003"
+    environment:
+      - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - RL_AGENT_INIT_MODE=${RL_AGENT_INIT_MODE:-web_policy}
+      - RL_AGENT_AUTO_EXPORT=${RL_AGENT_AUTO_EXPORT:-false}
+      - RL_AGENT_SEED=${RL_AGENT_SEED:-42}
+      - RL_MODEL_OUTPUT_PATH=/app/control_plane/rl_agent/artifacts/rl_agent_linear.json
+    volumes:
+      - ./control_plane/rl_agent/artifacts:/app/control_plane/rl_agent/artifacts
+    networks:
+      - adaptive_net
+    restart: unless-stopped
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
 
   routing_controller:
     build:

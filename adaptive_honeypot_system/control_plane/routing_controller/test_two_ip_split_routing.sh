@@ -103,21 +103,42 @@ if ! echo "$DECIDE_RESPONSE" | grep -q '"backend":"ssti_api"'; then
   exit 1
 fi
 
-echo "[6/6] Verify split routing result (A => SSTI, B => normal backend)..."
-RESP_A="$(docker exec "$CLIENT_A" curl -fsS http://gateway/api/health)"
-RESP_B="$(docker exec "$CLIENT_B" curl -fsS http://gateway/api/health)"
+echo "[6/6] Verify split routing result is endpoint-scoped (A preview => SSTI, other APIs normal)..."
+RESP_A_PREVIEW="$(docker exec "$CLIENT_A" curl -fsS -X POST http://gateway/api/tools/preview -H 'Content-Type: application/json' -d '{"content":"{{7*7}}"}')"
+RESP_A_HEALTH="$(docker exec "$CLIENT_A" curl -fsS http://gateway/api/health)"
+RESP_A_PING="$(docker exec "$CLIENT_A" curl -sS -X POST http://gateway/api/tools/ping -H 'Content-Type: application/json' -d '{"host":"8.8.8.8; id"}')"
+RESP_B_PREVIEW="$(docker exec "$CLIENT_B" curl -fsS -X POST http://gateway/api/tools/preview -H 'Content-Type: application/json' -d '{"content":"{{7*7}}"}')"
+RESP_B_HEALTH="$(docker exec "$CLIENT_B" curl -fsS http://gateway/api/health)"
 
-echo "Response A: $RESP_A"
-echo "Response B: $RESP_B"
+echo "Response A preview: $RESP_A_PREVIEW"
+echo "Response A health: $RESP_A_HEALTH"
+echo "Response A ping: $RESP_A_PING"
+echo "Response B preview: $RESP_B_PREVIEW"
+echo "Response B health: $RESP_B_HEALTH"
 
-if ! echo "$RESP_A" | grep -q '"service":"ssti-honeypot"'; then
-  echo "FAIL: client A was not routed to ssti-honeypot"
+if ! echo "$RESP_A_PREVIEW" | grep -q '"rendered":"49"'; then
+  echo "FAIL: client A preview was not routed to ssti-honeypot"
   exit 1
 fi
 
-if ! echo "$RESP_B" | grep -q '"service":"real-backend"'; then
+if ! echo "$RESP_A_HEALTH" | grep -q '"service":"real-backend"'; then
+  echo "FAIL: client A health should remain real-backend"
+  exit 1
+fi
+
+if ! echo "$RESP_A_PING" | grep -q "Invalid host"; then
+  echo "FAIL: client A ping should remain real service validation, not SSTI"
+  exit 1
+fi
+
+if echo "$RESP_B_PREVIEW" | grep -q '"rendered":"49"'; then
+  echo "FAIL: client B preview was incorrectly routed to ssti-honeypot"
+  exit 1
+fi
+
+if ! echo "$RESP_B_HEALTH" | grep -q '"service":"real-backend"'; then
   echo "FAIL: client B was not routed to real-backend"
   exit 1
 fi
 
-echo "PASS: split routing works as expected (one IP honeypot, one IP normal service)."
+echo "PASS: split routing works with endpoint-scoped honeypot routing."

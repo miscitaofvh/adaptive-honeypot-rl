@@ -24,6 +24,15 @@ Dynamic maps:
 - `/etc/haproxy/maps/session_routes.map`: `sid -> backend`.
 - `/etc/haproxy/maps/ip_honeypot.map`: `source_ip -> backend`.
 
+Luu y quan trong: map tren chi luu target backend, nhung HAProxy ap dung route theo dung API surface:
+
+- `sqli_api` chi ap dung cho `/api/articles/search`.
+- `cmdi_api` chi ap dung cho `/api/tools/ping`.
+- `ssti_api` chi ap dung cho `/api/tools/preview`.
+- `ssrf_api` chi ap dung cho `/api/tools/fetch`.
+
+Vi du neu `sid` duoc map toi `sqli_api`, chi request search cua session do vao SQLi honeypot; markdown preview, ping va fetch van di real backend trong normal-first mode.
+
 Luu y:
 
 - Gateway hien la HTTP-only. L4 Drop-and-Catch trong proposal chua implement.

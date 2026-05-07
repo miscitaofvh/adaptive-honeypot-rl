@@ -1,6 +1,6 @@
 # Ke hoach hoan thien Adaptive Honeypot RL
 
-Ngay cap nhat: 2026-05-06
+Ngay cap nhat: 2026-05-07
 
 Muc dich cua file nay: lam tai lieu dieu huong cho cac lan implement tiep theo. Neu Codex quay lai repo nay, doc file nay truoc `README.md`, `Progress.md`, va `proposal.md`, sau do lam theo thu tu o muc "Next execution plan".
 
@@ -8,14 +8,14 @@ Nguyen tac quan trong nhat cua do an: he thong khong tap trung "bao ve service" 
 
 ## 1) Current status snapshot
 
-Trang thai sau khi pull/scan 2026-05-06:
+Trang thai sau khi pull/scan 2026-05-07:
 
 - Web MVP da co data plane + control plane du de demo local:
   `real-backend log -> Filebeat/Elasticsearch -> llm_analyzer -> routing_controller -> HAProxy session map -> web honeypot`.
 - Control plane van bat dong bo voi request path. Request web khong cho analyzer/RL xu ly dong bo.
-- Runtime Docker services khong cai PyTorch. PyTorch chi dung local cho offline training.
-- LLM analyzer da co Groq API integration, nhung fallback khi thieu API key/timeout chua chac; neu LLM khong tra output thi adaptive route co the khong dien ra.
-- RL policy that chua implement. Hien tai Web MVP van dua vao `RL_POLICY_MODE=heuristic` hoac dummy JSON model.
+- Runtime request-path services khong cai PyTorch. PyTorch chi dung local cho offline training va trong service rieng `rl_agent`.
+- LLM analyzer da co Groq API integration va rule-based fallback khi thieu API key/timeout de route cac Web attack ro rang.
+- RL policy that chua implement. Hien tai Web MVP van dua vao `RL_POLICY_MODE=heuristic`, dummy JSON model, hoac Torch `rl_agent` web_policy/one-epoch stub de export artifact dung format.
 - Runtime code da migrate sang `rl_state_v2_16` (`STATE_DIM=16`) trong analyzer, routing controller, RL agent, dummy model scripts va synthetic data generator.
 - L4 SSH/FTP/SMTP Drop-and-Catch chua implement. Controller/gateway da fail ro rang neu dung L4 placeholder.
 - Route maps duoc clear sau E2E tests de tranh stale state.
@@ -60,7 +60,7 @@ Ket qua quan trong:
 | Structured logging | DONE for MVP | JSON logs cho backend/honeypots, request/session/body preview, masking co ban | Gateway selected-backend parsing, Kibana dashboard |
 | Filebeat/ES | DONE for MVP | Docker log ingest, JSON decode, bo hardcoded container IDs, giu controller/analyzer logs | Saved searches/dashboard, retention/index template polish |
 | LLM analyzer | PARTIAL DONE | Poll ES, enrich body_preview, call Groq or rule fallback, validate semantic JSON, build state v2, call controller | State builder package polish, memory durable/decay, input summary hygiene |
-| Dummy RL | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime | Real replay buffer, reward, train/evaluate policy |
+| Dummy/Torch RL stub | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime, Torch `rl_agent` service `/predict` `/export` `/train/one-epoch` | Real replay buffer, reward, train/evaluate policy |
 | RL state schema | DONE for runtime | `rl_state_v2_16`, protocol de ngoai tensor lam metadata/action-mask context, code runtime da dung 16D | Unit tests/schema package polish, replay artifacts moi |
 | L4 Drop-and-Catch | NOT STARTED | Disabled safely | SSH/FTP/SMTP data plane, honeypots, reconnect tests |
 | Benchmark/research metrics | NOT STARTED | E2E smoke tests only | RQ metrics, attack drivers, adaptive vs static/rule comparison |
@@ -102,9 +102,14 @@ Done:
 - `adaptive_honeypot_system/control_plane/rl_agent/create_dummy_web_policy_model.py`
   - Creates deterministic subtype-based dummy web model artifact.
 
+- `adaptive_honeypot_system/control_plane/rl_agent/service.py`
+  - FastAPI Torch RL service.
+  - Debug/attack exposure mode.
+  - Exports controller-compatible JSON model.
+  - Runs only one tiny proxy epoch when requested; no full train.
+
 Remaining:
 
-- Rule-based fallback when Groq is unavailable or returns invalid output.
 - Redis or durable memory with decay and session history.
 - Formal state builder package using `rl_state_v2_16`.
 - Real replay buffer extraction and RL evaluation.
@@ -321,15 +326,15 @@ Done:
 
 Not done:
 
-- [ ] Dedicated `state_builder/` package.
+- [x] Dedicated `state_builder/` package for schema constants and runtime validation.
 - [ ] `StateVector` dataclass with named fields and schema version.
 - [ ] Unit tests for state dimension/order.
 - [x] Runtime migration from `STATE_DIM=24` to `STATE_DIM=16`.
-- [ ] Rule-based fallback that still routes Web attacks when LLM provider is unavailable.
+- [x] Rule-based fallback that still routes obvious Web attacks when LLM provider is unavailable.
 - [ ] Real session memory.
 - [ ] Redis service or durable memory.
-- [ ] Strict LLM output schema.
-- [ ] Failure/timeout policy around real LLM calls.
+- [x] Strict LLM output schema validation/clamping.
+- [ ] Retry/backoff and production-grade timeout policy around real LLM calls.
 
 Runtime state schema: `rl_state_v2_16`
 
@@ -614,6 +619,14 @@ Acceptance:
 
 Goal: bat dau thay dummy policy bang policy co the danh gia tren data that.
 
+Already done for stub phase:
+
+- [x] Add Torch `rl_agent` service.
+- [x] Keep service outside synchronous request path.
+- [x] Support debug/attack exposure mode.
+- [x] Export model artifact in controller JSON format.
+- [x] Provide one-epoch proxy train endpoint without full train.
+
 Files to create:
 
 - `adaptive_honeypot_system/control_plane/rl_agent/extract_replay_buffer.py`
@@ -719,7 +732,7 @@ Already satisfied:
 - [x] Single SQLi adaptive test routes to SQLI honeypot.
 - [x] Frontend/API core contract does not break in smoke tests.
 - [x] ES/Filebeat/analyzer/controller path works.
-- [x] Runtime containers avoid PyTorch.
+- [x] Request-path containers avoid PyTorch; `rl_agent` intentionally contains Torch.
 - [x] README demo commands are present.
 
 Still needed before claiming research-complete Web MVP:
@@ -735,7 +748,7 @@ Still needed before claiming research-complete Web MVP:
 
 Needed:
 
-- [ ] Real LLM analyzer or clearly justified mock/fallback.
+- [x] Real LLM analyzer with rule fallback for local demo.
 - [ ] Stateful memory.
 - [ ] RL trained/evaluated on replay or benchmark data.
 - [ ] Benchmark answers RQ-style questions.
@@ -788,9 +801,10 @@ cd adaptive_honeypot_system
 docker compose exec routing_controller python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 docker compose exec backend python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 docker compose exec cmdi_pot python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
+docker compose exec rl_agent python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
 ```
 
-Expected: all `False`.
+Expected: first three are `False`; `rl_agent` is `True`.
 
 ## 9) Known risks and guardrails
 
@@ -825,14 +839,14 @@ Future work:
 Current mitigation:
 
 - Docs distinguish current runtime v2 16D from removed v1 24D schema.
-- Docs call RL policy heuristic/dummy until replay training/evaluation exists.
+- Docs call RL policy heuristic/dummy/Torch stub until replay training/evaluation exists.
 - L4 disabled explicitly.
 
 Future work:
 
 - Add design note: current demo vs full proposal.
 - Benchmark before making research claims.
-- Complete state v2 migration before training/evaluating RL.
+- Regenerate/evaluate RL artifacts with state v2 replay data before making research claims.
 
 ### Risk: LLM makes demo unstable
 
