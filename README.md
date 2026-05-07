@@ -179,6 +179,7 @@ make test-routes
 make test-honeypots
 make test-rl-split-ip
 make test-adaptive-web
+make test-adaptive-attacks
 make validate
 ```
 
@@ -209,6 +210,7 @@ Lần quét/sanity gần nhất (2026-05-07):
   - Client A -> `ssti-honeypot`
   - Client B -> `real-backend`
 - `make test-adaptive-web`: PASS (`log -> analyzer -> heuristic RL/controller -> HAProxy session route -> SQLI honeypot`).
+- `make test-adaptive-attacks`: PASS (`SQLi`, `CMDi`, `SSTI`, `SSRF` route đúng endpoint-scoped honeypot; không tạo route giả `sid="-"`).
 - Route maps sau E2E: sạch (`session_routes={}`, `ip_routes={}`).
 
 Frontend local Vite build chưa chạy riêng; frontend Docker container đã start được trong Compose stack.

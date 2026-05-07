@@ -123,6 +123,7 @@ Kết quả:
 - [x] `make test-honeypots` PASS.
 - [x] `make test-rl-split-ip` PASS (Client A -> `ssti-honeypot`, Client B -> `real-backend`).
 - [x] `make test-adaptive-web` PASS (`log -> analyzer -> controller -> HAProxy session route -> SQLI honeypot`).
+- [x] `make test-adaptive-attacks` PASS (`SQLi`, `CMDi`, `SSTI`, `SSRF` route đúng endpoint-scoped honeypot; không route sentinel `sid="-"`).
 - [x] `make validate` PASS (syntax check, routing controller health, honeypot tests, core route smoke).
 - [x] Route maps sạch sau E2E (`session_routes={}`, `ip_routes={}`).
 

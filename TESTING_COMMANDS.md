@@ -129,6 +129,12 @@ Chạy adaptive Web MVP flow:
 make test-adaptive-web
 ```
 
+Chạy full adaptive attack-surface flow cho SQLi/CMDi/SSTI/SSRF:
+
+```bash
+make test-adaptive-attacks
+```
+
 Chạy split-IP routing test:
 
 ```bash
@@ -383,13 +389,14 @@ SSTI:
 ```bash
 curl -i -X POST "http://localhost:5004/api/tools/preview" \
   -H "Content-Type: application/json" \
-  -d '{"content":"{{7*7}}"}'
+  -d '{"content":"# Hello\n\nType some **Markdown** here.\n\n```python\nprint(\"hello\")\n```\n\n{{7*7}}"}'
 ```
 
 Expected:
 
 - HTTP `200`.
-- Body contains `"rendered":"49"`.
+- Body preserves markdown HTML such as `<h1>Hello</h1>` and `<strong>Markdown</strong>`.
+- Body contains `49` and does not expose raw `{{7*7}}`.
 
 SSRF:
 
@@ -454,7 +461,7 @@ SSTI via gateway:
 ```bash
 curl -i -X POST "http://localhost:18080/api/tools/preview" \
   -H "Content-Type: application/json" \
-  -d '{"content":"{{7*7}}"}'
+  -d '{"content":"# Hello\n\nType some **Markdown** here.\n\n```python\nprint(\"hello\")\n```\n\n{{7*7}}"}'
 ```
 
 SSRF via gateway:
@@ -679,6 +686,7 @@ make clear-routes
 curl -s http://localhost:18080/api/health
 make validate
 make test-adaptive-web
+make test-adaptive-attacks
 curl -s http://localhost:8001/routes
 ```
 

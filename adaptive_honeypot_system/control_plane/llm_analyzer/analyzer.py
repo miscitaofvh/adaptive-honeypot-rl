@@ -45,6 +45,7 @@ DEBUG_EXPOSURE = EXPOSURE_MODE in {"debug", "dev", "development", "operator", "t
 ROUTE_COOLDOWN_SECONDS = float(os.getenv("ROUTE_COOLDOWN_SECONDS", "5"))
 ANALYZER_ROUTE_THRESHOLD = float(os.getenv("ANALYZER_ROUTE_THRESHOLD", "0.45"))
 SERVICE_BODY_CACHE_SECONDS = float(os.getenv("SERVICE_BODY_CACHE_SECONDS", "120"))
+SERVICE_BODY_WAIT_SECONDS = float(os.getenv("SERVICE_BODY_WAIT_SECONDS", "15"))
 ANALYZER_STARTED_AT = datetime.now(timezone.utc)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -69,6 +70,20 @@ ATTACK_TO_BACKEND = {
 
 # Paths that are only reachable via API — frontend/static hits are ignored
 API_PATH_PREFIX = "/api/"
+
+# API calls where the attack signal normally lives in the JSON body. Gateway
+# logs arrive before/after service logs nondeterministically, so these events
+# should wait briefly for body_preview enrichment.
+BODY_ENRICHMENT_PATHS = frozenset({
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/articles",
+    "/api/articles/search",
+    "/api/tools/ping",
+    "/api/tools/preview",
+    "/api/tools/fetch",
+})
+BODY_ENRICHMENT_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
 # Fields to drop from every event before sending to LLM (always-constant or infra noise)
 _DROP_FIELDS = frozenset({
@@ -104,12 +119,16 @@ _pending_events: dict[str, list[dict]] = defaultdict(list)
 # (session_id, method, path) → (body_preview, timestamp), used when Filebeat
 # ingests service logs and gateway logs in different polling windows.
 _recent_service_bodies: dict[tuple[str, str, str], tuple[str, float]] = {}
+# gateway ES _id → first time we saw it without a matching service body
+_deferred_gateway_events: dict[str, float] = {}
 
 stats: dict[str, Any] = {
     "decisions": 0,
     "last_error": "",
     "last_poll_at": "",
     "llm_calls": 0,
+    "body_enriched_events": 0,
+    "rule_guardrail_overrides": 0,
 }
 
 
@@ -126,6 +145,10 @@ class AnalyzerStats(BaseModel):
     seen_events: int
     decisions: int
     llm_calls: int
+    body_cache_entries: int
+    deferred_gateway_events: int
+    body_enriched_events: int
+    rule_guardrail_overrides: int
     last_error: str = ""
     last_poll_at: str = ""
 
@@ -165,6 +188,13 @@ def _nullify(value: Any) -> Any:
     return value
 
 
+def _clean_str(value: Any) -> str:
+    value = _nullify(value)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -182,6 +212,10 @@ def _events_text(events: list[dict]) -> str:
     return "\n".join(parts).lower()
 
 
+def _without_markdown_fenced_code(text: str) -> str:
+    return re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+
+
 def _score_patterns(text: str, patterns: tuple[str, ...]) -> float:
     hits = sum(1 for pattern in patterns if re.search(pattern, text, re.IGNORECASE))
     if hits == 0:
@@ -192,14 +226,15 @@ def _score_patterns(text: str, patterns: tuple[str, ...]) -> float:
 def rule_based_semantic_fallback(session_id: str, events: list[dict]) -> dict[str, Any]:
     """Produce LLM-shaped semantic output when the provider is unavailable."""
     text = _events_text(events)
+    cmdi_text = _without_markdown_fenced_code(text)
     sqli = _score_patterns(text, (
         r"\bunion\b\s+\bselect\b",
         r"\bselect\b.+\bfrom\b",
         r"\bor\b\s+1\s*=\s*1",
-        r"--|#|/\*|\*/",
+        r"--|/\*|\*/",
         r"\binformation_schema\b|\bdrop\b|\binsert\b|\bupdate\b",
     ))
-    cmdi = _score_patterns(text, (
+    cmdi = _score_patterns(cmdi_text, (
         r";|\||&&|`|\$\(",
         r"\bwhoami\b|\bid\b|\buname\b|\bcat\b|\bls\b|\bcurl\b|\bwget\b",
         r"/etc/passwd|/etc/shadow|cmd\.exe|powershell",
@@ -656,6 +691,95 @@ def get_recent_service_body(session_id: str, method: str, path: str) -> Optional
     return body
 
 
+def should_wait_for_body(method: str, path: str) -> bool:
+    return method.upper() in BODY_ENRICHMENT_METHODS and path in BODY_ENRICHMENT_PATHS
+
+
+def prune_deferred_gateway_events() -> None:
+    now = time.time()
+    max_age = max(SERVICE_BODY_WAIT_SECONDS * 3, SERVICE_BODY_CACHE_SECONDS)
+    expired = [
+        event_id
+        for event_id, first_seen in _deferred_gateway_events.items()
+        if event_id in seen_event_ids or now - first_seen > max_age
+    ]
+    for event_id in expired:
+        _deferred_gateway_events.pop(event_id, None)
+
+
+def defer_gateway_event(event_id: str, sid: str, method: str, path: str) -> bool:
+    if not event_id or not sid or not should_wait_for_body(method, path):
+        return False
+
+    now = time.time()
+    first_seen = _deferred_gateway_events.get(event_id)
+    if first_seen is None:
+        _deferred_gateway_events[event_id] = now
+        logger.info(
+            "deferring gateway event until service body arrives sid=%s method=%s path=%s wait_seconds=%.1f",
+            sid,
+            method,
+            path,
+            SERVICE_BODY_WAIT_SECONDS,
+        )
+        return True
+
+    if now - first_seen < SERVICE_BODY_WAIT_SECONDS:
+        return True
+
+    logger.info(
+        "processing gateway event without service body after wait sid=%s method=%s path=%s waited_seconds=%.1f",
+        sid,
+        method,
+        path,
+        now - first_seen,
+    )
+    return False
+
+
+def scaled_best_web_score(output: dict[str, Any]) -> tuple[int, float]:
+    scores = output.get("web_subtype_scores", [0.0, 0.0, 0.0, 0.0])
+    if not isinstance(scores, list):
+        scores = [0.0, 0.0, 0.0, 0.0]
+    scores = [_clamp(value) for value in scores[:4]]
+    while len(scores) < 4:
+        scores.append(0.0)
+    confidence = _clamp(output.get("llm_confidence", 0.0))
+    scaled_scores = [score * confidence for score in scores]
+    best_idx = max(range(4), key=lambda idx: scaled_scores[idx])
+    return best_idx, scaled_scores[best_idx]
+
+
+def apply_rule_guardrail(session_id: str, events: list[dict], llm_output: Optional[dict[str, Any]]) -> tuple[dict[str, Any], str]:
+    fallback_output = rule_based_semantic_fallback(session_id, events)
+    if llm_output is None:
+        return fallback_output, "rule_fallback"
+
+    llm_idx, llm_best = scaled_best_web_score(llm_output)
+    fallback_idx, fallback_best = scaled_best_web_score(fallback_output)
+    should_override = (
+        fallback_best >= ANALYZER_ROUTE_THRESHOLD
+        and (
+            llm_best < ANALYZER_ROUTE_THRESHOLD
+            or (fallback_idx != llm_idx and fallback_best >= llm_best + 0.10)
+        )
+    )
+    if should_override:
+        stats["rule_guardrail_overrides"] = int(stats.get("rule_guardrail_overrides", 0)) + 1
+        logger.info(json.dumps({
+            "event_type": "llm_rule_guardrail",
+            "service": "llm-analyzer",
+            "session_id": session_id,
+            "llm_best_score": llm_best,
+            "rule_best_score": fallback_best,
+            "llm_best_idx": llm_idx,
+            "rule_best_idx": fallback_idx,
+        }, ensure_ascii=True))
+        return fallback_output, "llm_rule_guardrail"
+
+    return llm_output, "llm"
+
+
 def build_state_vector(rule_features: dict[str, float], llm_output: Optional[dict]) -> list[float]:
     """
     Assemble the v2 16D state tensor from rule-based features + semantic output.
@@ -753,10 +877,7 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     rule_features["_session_id"] = session_id
 
     llm_output = call_llm(context)
-    semantic_source = "llm"
-    if llm_output is None:
-        llm_output = rule_based_semantic_fallback(session_id, events)
-        semantic_source = "rule_fallback"
+    llm_output, semantic_source = apply_rule_guardrail(session_id, events, llm_output)
 
     state = build_state_vector(rule_features, llm_output)
 
@@ -829,6 +950,7 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def poll_elasticsearch_once() -> int:
+    prune_deferred_gateway_events()
     window_start = datetime.now(timezone.utc) - timedelta(seconds=ANALYZER_WINDOW_SECONDS)
     lower_bound = max(window_start, ANALYZER_STARTED_AT).isoformat()
     query = {
@@ -872,7 +994,7 @@ def poll_elasticsearch_once() -> int:
         if event_type in ("honeypot_interaction", "request"):
             # Service-level log with body_preview — index for enrichment
             remember_seen(event_id)
-            sid = str(raw_app.get("session_id") or "").strip()
+            sid = _clean_str(raw_app.get("session_id"))
             method = str(raw_app.get("method") or "").upper()
             path = str(raw_app.get("path") or "")
             body = raw_app.get("body_preview")
@@ -891,23 +1013,31 @@ def poll_elasticsearch_once() -> int:
         event_id = str(hit.get("_id") or "")
         if event_id in seen_event_ids:
             continue
-        remember_seen(event_id)
 
         raw_app = parse_source(hit)
         if not raw_app:
+            remember_seen(event_id)
             continue
 
         # Enrich gateway event with body_preview from service log
-        sid = str(raw_app.get("session_id") or "").strip()
+        sid = _clean_str(raw_app.get("session_id"))
         method = str(raw_app.get("method") or "").upper()
         path = str(raw_app.get("path") or "")
         body_key = (sid, method, path)
         if body_key in service_bodies and not raw_app.get("body_preview"):
             raw_app["body_preview"] = service_bodies[body_key]
+            stats["body_enriched_events"] = int(stats.get("body_enriched_events", 0)) + 1
         elif not raw_app.get("body_preview"):
             cached_body = get_recent_service_body(sid, method, path)
             if cached_body:
                 raw_app["body_preview"] = cached_body
+                stats["body_enriched_events"] = int(stats.get("body_enriched_events", 0)) + 1
+
+        if not raw_app.get("body_preview") and defer_gateway_event(event_id, sid, method, path):
+            continue
+
+        _deferred_gateway_events.pop(event_id, None)
+        remember_seen(event_id)
 
         timestamp = (hit.get("_source") or {}).get("@timestamp", now_iso())
         event = clean_event(raw_app, timestamp)
@@ -979,6 +1109,10 @@ def health() -> dict[str, Any]:
         seen_events=len(seen_event_ids),
         decisions=int(stats["decisions"]),
         llm_calls=int(stats["llm_calls"]),
+        body_cache_entries=len(_recent_service_bodies),
+        deferred_gateway_events=len(_deferred_gateway_events),
+        body_enriched_events=int(stats.get("body_enriched_events", 0)),
+        rule_guardrail_overrides=int(stats.get("rule_guardrail_overrides", 0)),
         last_error=str(stats["last_error"]),
         last_poll_at=str(stats["last_poll_at"]),
     ).model_dump()

@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model rl-agent-export rl-agent-one-epoch clear-routes test-rl-split-ip test-adaptive-web validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model rl-agent-export rl-agent-one-epoch clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -61,6 +61,7 @@ help:
 	@echo "  $(CYAN)test-honeypots$(RESET)     Run standalone honeypot detection script"
 	@echo "  $(CYAN)test-rl-split-ip$(RESET)   Validate one-IP honeypot split routing via controller"
 	@echo "  $(CYAN)test-adaptive-web$(RESET)  Validate log -> analyzer -> route -> honeypot flow"
+	@echo "  $(CYAN)test-adaptive-attacks$(RESET) Validate SQLi/CMDi/SSTI/SSRF adaptive routes"
 	@echo "  $(CYAN)validate$(RESET)           Run syntax + core smoke checks"
 	@echo ""
 	@echo "$(YELLOW)RL TRAINING:$(RESET)"
@@ -353,6 +354,10 @@ test-rl-split-ip:
 test-adaptive-web:
 	@echo "$(CYAN)[Running adaptive Web MVP flow test...]$(RESET)"
 	@bash control_plane/llm_analyzer/test_adaptive_web_flow.sh
+
+test-adaptive-attacks:
+	@echo "$(CYAN)[Running adaptive Web attack surface test suite...]$(RESET)"
+	@bash control_plane/llm_analyzer/test_adaptive_attack_surfaces.sh
 
 validate:
 	@echo "$(CYAN)[Python syntax check...]$(RESET)"

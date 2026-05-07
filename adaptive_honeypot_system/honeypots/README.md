@@ -12,7 +12,7 @@ Honeypots:
 
 - `cmdi_pot`: command injection, fake output nhu `whoami`, `id`, `/etc/passwd`.
 - `sqli_pot`: SQL injection, fake database syntax error.
-- `ssti_pot`: server-side template injection, fake template render/config leak.
+- `ssti_pot`: server-side template injection, fake template render/config leak; markdown preview van render nhu real service roi thay template token bang output gia lap.
 - `ssrf_pot`: SSRF, fake metadata/internal service response.
 
 Shared files:

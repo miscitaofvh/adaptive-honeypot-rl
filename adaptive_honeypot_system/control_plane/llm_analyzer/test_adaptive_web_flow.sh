@@ -39,10 +39,17 @@ cleanup() {
   curl -fsS -X DELETE "$CONTROLLER_URL/routes" >/dev/null 2>&1 || true
   curl -fsS -X DELETE "$CONTROLLER_URL/route/session/$SID" >/dev/null 2>&1 || true
 }
+
+settled_cleanup() {
+  sleep 8
+  cleanup
+  sleep 3
+  cleanup
+}
 trap cleanup EXIT
 
 echo "[1/6] Start Web MVP stack in normal-first mode with heuristic RL..."
-TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true docker compose up -d --build --force-recreate \
+GROQ_API_KEY= TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true SERVICE_BODY_WAIT_SECONDS=8 docker compose up -d --build --force-recreate \
   elasticsearch \
   backend \
   sqli_pot \
@@ -126,5 +133,7 @@ if ! echo "$PING_BODY" | grep -q "Invalid host"; then
   echo "FAIL: expected real ping validation response"
   exit 1
 fi
+
+settled_cleanup
 
 echo "PASS: log -> analyzer -> heuristic RL/controller -> endpoint-scoped HAProxy route -> SQLi honeypot flow works."

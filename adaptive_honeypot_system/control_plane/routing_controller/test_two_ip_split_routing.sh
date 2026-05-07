@@ -116,7 +116,7 @@ echo "Response A ping: $RESP_A_PING"
 echo "Response B preview: $RESP_B_PREVIEW"
 echo "Response B health: $RESP_B_HEALTH"
 
-if ! echo "$RESP_A_PREVIEW" | grep -q '"rendered":"49"'; then
+if ! echo "$RESP_A_PREVIEW" | grep -q '49'; then
   echo "FAIL: client A preview was not routed to ssti-honeypot"
   exit 1
 fi
@@ -131,7 +131,7 @@ if ! echo "$RESP_A_PING" | grep -q "Invalid host"; then
   exit 1
 fi
 
-if echo "$RESP_B_PREVIEW" | grep -q '"rendered":"49"'; then
+if echo "$RESP_B_PREVIEW" | grep -q '49'; then
   echo "FAIL: client B preview was incorrectly routed to ssti-honeypot"
   exit 1
 fi

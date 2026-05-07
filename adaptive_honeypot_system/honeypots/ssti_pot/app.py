@@ -1,4 +1,6 @@
 import os, re, sys; sys.path.insert(0,'/app/shared')
+import bleach
+import markdown
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from honeypot_base import health_payload, honeypot_middleware # type: ignore
@@ -7,9 +9,36 @@ from fake_data import ARTICLES
 app = Flask(__name__); CORS(app, resources={r"/api/*":{"origins":"*"}}); honeypot_middleware(app)
 
 _RE = re.compile(r'(\{\{.*?\}\}|\{%.*?%\}|\$\{.*?\}|#\{.*?\})',re.DOTALL)
+ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + ['h1','h2','h3','h4','h5','h6','p','pre','code','blockquote','ul','ol','li','hr','br','table','thead','tbody','tr','th','td']
+ALLOWED_ATTRS = {**bleach.sanitizer.ALLOWED_ATTRIBUTES, 'code':['class'], 'pre':['class']}
+
 def _txt(v): return v.strip() if isinstance(v,str) else ('' if v is None else str(v).strip())
 def _ssti(t): return bool(_RE.search(str(t or '')))
 def _any(fs): return next(((True,str(f)) for f in fs if _ssti(f)),(False,''))
+
+def _eval_template_token(token):
+    inner=token.strip()
+    if inner.startswith('{{') and inner.endswith('}}'): inner=inner[2:-2].strip()
+    elif inner.startswith('{%') and inner.endswith('%}'): inner=inner[2:-2].strip()
+    elif inner.startswith('${') and inner.endswith('}'): inner=inner[2:-1].strip()
+    elif inner.startswith('#{') and inner.endswith('}'): inner=inner[2:-1].strip()
+    if re.search(r'config|__class__|__mro__|__subclasses__',inner,re.I):
+        return "<Config {'ENV':'production','DEBUG':False,'SECRET_KEY':'...','SQLALCHEMY_DATABASE_URI':'sqlite:////data/meridian.db'}>"
+    m=re.fullmatch(r'(\d+)\s*([*+\-/])\s*(\d+)',inner)
+    if m:
+        left=int(m.group(1)); op=m.group(2); right=int(m.group(3))
+        if op=='*': return str(left*right)
+        if op=='+': return str(left+right)
+        if op=='-': return str(left-right)
+        if op=='/' and right: return str(left/right).rstrip('0').rstrip('.')
+    cleaned=re.sub(r'[\{\}\$\#\[\]%]','',inner).strip()
+    return cleaned or 'None'
+
+def _render_markdown(content):
+    evaluated=_RE.sub(lambda m: _eval_template_token(m.group(0)),content)
+    rendered=markdown.markdown(evaluated,extensions=['fenced_code','tables','nl2br'])
+    return bleach.clean(rendered,tags=ALLOWED_TAGS,attributes=ALLOWED_ATTRS)
+
 def _resp(p):
     a=re.search(r'(\d+)\s*\*\s*(\d+)',p)
     if a: return {"rendered":str(int(a.group(1))*int(a.group(2)))}
@@ -45,9 +74,8 @@ def get_article(aid):
     return jsonify(message='Not found.'),404
 @app.post('/api/tools/preview')
 def preview():
-    d=request.get_json(silent=True) or {}; c=_txt(d.get('content')); hit,p=_any([c])
-    if hit: r=_resp(p); return jsonify(rendered=r.get('rendered',''),word_count=len(c.split()),read_time=1)
-    return jsonify(rendered=f'<p>{c}</p>',word_count=len(c.split()),read_time=1)
+    d=request.get_json(silent=True) or {}; c=_txt(d.get('content'))[:32000]
+    return jsonify(rendered=_render_markdown(c),word_count=len(re.findall(r'\w+',c)),read_time=max(1,round(len(re.findall(r'\w+',c))/200)))
 @app.post('/api/tools/ping')
 def ping():
     d=request.get_json(silent=True) or {}; h=_txt(d.get('host')); hit,p=_any([h])

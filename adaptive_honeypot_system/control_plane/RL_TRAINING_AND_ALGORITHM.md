@@ -328,6 +328,7 @@ Script sẽ:
 
 ```bash
 make test-adaptive-web
+make test-adaptive-attacks
 ```
 
 Script sẽ:
@@ -336,10 +337,11 @@ Script sẽ:
 - Gửi SQLi-like payload vào real backend search endpoint.
 - Đợi analyzer poll Elasticsearch, dựng state runtime hiện tại và gọi `/decide`.
 - Xác nhận request tiếp theo cùng `sid` được route sang SQLi honeypot.
+- Test mở rộng xác nhận SQLi/CMDi/SSTI/SSRF đều route đúng endpoint-scoped honeypot và không route sentinel `sid="-"`.
 
 ## 10) Giới hạn hiện tại
 
-- `llm_analyzer` đã gọi Groq khi có key và có rule fallback khi provider lỗi/thiếu key; phần còn lại là provider abstraction, retry/backoff, và memory decay.
+- `llm_analyzer` đã gọi Groq khi có key, có rule fallback/guardrail khi provider lỗi hoặc LLM bỏ sót payload rõ ràng; phần còn lại là provider abstraction, retry/backoff, và memory decay.
 - Runtime state đã là `rl_state_v2_16`.
 - Mô hình hiện tại là linear Q approximation/Torch stub, chưa phải DQN/BCQ đầy đủ.
 - Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
@@ -348,6 +350,6 @@ Script sẽ:
 ## 11) Hướng phát triển tiếp
 
 - Tách feature computation còn nằm trong analyzer sang state builder package.
-- Bổ sung rule fallback cho LLM analyzer.
+- Tách rule fallback/guardrail của LLM analyzer thành module testable riêng.
 - Train trên replay buffer tách từ traffic logs.
 - Thêm integration test đầy đủ: `log ingest -> state build -> RL decide -> routing update`.

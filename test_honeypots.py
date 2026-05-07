@@ -77,8 +77,11 @@ def validate_ssti(status: int, body: dict[str, Any]) -> tuple[bool, str]:
     if status != 200:
         return False, f"expected status 200, got {status}"
     rendered = str(body.get("rendered", ""))
-    if rendered != "49":
-        return False, f"expected rendered=49, got {rendered}"
+    for expected in ("<h1>Hello</h1>", "<strong>Markdown</strong>", "<code", "49"):
+        if expected not in rendered:
+            return False, f"expected {expected!r} in rendered output, got {rendered}"
+    if "{{7*7}}" in rendered:
+        return False, f"expected SSTI expression to be evaluated, got {rendered}"
     return True, "ok"
 
 
@@ -146,7 +149,7 @@ def run_tests() -> int:
             method="POST",
             url="http://127.0.0.1:5004/api/tools/preview",
             fallback_url="http://[::1]:5004/api/tools/preview",
-            payload={"content": "{{7*7}}"},
+            payload={"content": "# Hello\n\nType some **Markdown** here.\n\n```python\nprint(\"hello\")\n```\n\n{{7*7}}"},
             validator=validate_ssti,
         ),
         TestCase(

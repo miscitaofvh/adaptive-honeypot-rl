@@ -27,6 +27,7 @@ Da chay trong `adaptive_honeypot_system/` va PASS:
 
 ```bash
 make test-adaptive-web
+make test-adaptive-attacks
 make test-rl-split-ip
 make test-honeypots
 make validate
@@ -39,6 +40,10 @@ Ket qua quan trong:
   - Analyzer doc log tu Elasticsearch.
   - Controller route session sang `sqli_api`.
   - Request tiep theo cung `sid` vao SQLI honeypot va nhan fake DB error.
+- `make test-adaptive-attacks`: PASS
+  - SQLi/CMDi/SSTI/SSRF deu route dung endpoint-scoped honeypot.
+  - Analyzer khong route HAProxy sentinel `sid="-"`.
+  - Rule fallback test deterministic khi `GROQ_API_KEY` rong.
 - `make test-rl-split-ip`: PASS
   - Client A -> `ssti-honeypot`.
   - Client B -> `real-backend`.
@@ -59,7 +64,7 @@ Ket qua quan trong:
 | Gateway route updates | DONE for MVP | Idempotent map update/remove, clear all maps, `drop_connection` fail ro rang | L4 drop implementation neu chon lam Phase 8 |
 | Structured logging | DONE for MVP | JSON logs cho backend/honeypots, request/session/body preview, masking co ban | Gateway selected-backend parsing, Kibana dashboard |
 | Filebeat/ES | DONE for MVP | Docker log ingest, JSON decode, bo hardcoded container IDs, giu controller/analyzer logs | Saved searches/dashboard, retention/index template polish |
-| LLM analyzer | PARTIAL DONE | Poll ES, enrich body_preview, call Groq or rule fallback, validate semantic JSON, build state v2, call controller | State builder package polish, memory durable/decay, input summary hygiene |
+| LLM analyzer | PARTIAL DONE | Poll ES, defer/enrich body_preview, call Groq or rule fallback, rule guardrail, validate semantic JSON, build state v2, call controller | State builder package polish, memory durable/decay, input summary hygiene |
 | Dummy/Torch RL stub | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime, Torch `rl_agent` service `/predict` `/export` `/train/one-epoch` | Real replay buffer, reward, train/evaluate policy |
 | RL state schema | DONE for runtime | `rl_state_v2_16`, protocol de ngoai tensor lam metadata/action-mask context, code runtime da dung 16D | Unit tests/schema package polish, replay artifacts moi |
 | L4 Drop-and-Catch | NOT STARTED | Disabled safely | SSH/FTP/SMTP data plane, honeypots, reconnect tests |
@@ -193,6 +198,7 @@ Remaining:
 Done in `adaptive_honeypot_system/Makefile`:
 
 - `make test-adaptive-web`
+- `make test-adaptive-attacks`
 - `make test-rl-split-ip`
 - `make test-honeypots`
 - `make make-dummy-web-model`
@@ -375,6 +381,7 @@ Status: DONE for single-attack Web MVP, incomplete for research benchmark.
 - [x] Calls routing controller.
 - [x] Applies HAProxy session route.
 - [x] `make test-adaptive-web` proves SQLi single-attack route.
+- [x] `make test-adaptive-attacks` proves SQLi/CMDi/SSTI/SSRF endpoint-scoped routes.
 - [x] Route cleanup keeps maps clean after tests.
 - [x] Migrate adaptive flow to `rl_state_v2_16`.
 - [ ] Multi-attack same session route-shift demo.
