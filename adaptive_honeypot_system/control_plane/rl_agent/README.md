@@ -7,7 +7,7 @@ Chuc nang:
 - `agent.py`: action space, action masking, runtime `LinearQAgent`.
 - `service.py`: FastAPI Torch RL agent service cho debug/predict/export/one-epoch proxy train.
 - `generate_fake_data.py`: tao synthetic transitions de bootstrap.
-- `train_offline.py`: train offline Q-learning bang PyTorch local.
+- `train_offline.py`: train offline Discrete CQL bang PyTorch local/container; giu Q-learning lam baseline.
 - `create_dummy_ssti_model.py`: dummy model route moi HTTP state sang SSTI.
 - `create_dummy_web_policy_model.py`: dummy subtype-based web model cho SQLi/CMDI/SSTI/SSRF.
 - `Dockerfile` + `requirements.txt`: image rieng cho Torch RL service.
@@ -19,6 +19,9 @@ Rang buoc quan trong:
 - `requirements-local.txt` chi dung cho train local.
 - Runtime controller doc JSON weights hoac dung `RL_POLICY_MODE=heuristic`; controller khong import torch.
 - `POST /train/one-epoch` chi la proxy epoch cuc nho de chung minh duong Torch hoat dong, khong phai full train.
+- `train_offline.py` mac dinh dung `--algorithm cql`; co the dung `--algorithm q_learning` de so sanh baseline.
+- Offline train co `--behavior-cloning-weight` de giu short smoke-train hoc duoc action trong replay/synthetic data.
+- `--init-policy web_prior` la mac dinh: seed cac weight HTTP subtype theo state schema (`target_sqli_score`, `target_cmdi_score`, `target_ssti_score`, `target_ssrf_score`) roi moi fine-tune bang CQL. Dung `--init-policy random` neu muon train from scratch.
 
 Service endpoints:
 

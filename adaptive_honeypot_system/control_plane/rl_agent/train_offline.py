@@ -13,6 +13,10 @@ import torch.nn.functional as F
 from agent import (
     ACTIONS,
     ACTION_KEEP_NORMAL,
+    ACTION_ROUTE_CMDI,
+    ACTION_ROUTE_SQLI,
+    ACTION_ROUTE_SSRF,
+    ACTION_ROUTE_SSTI,
     STATE_DIM,
     STATE_SCHEMA_VERSION,
     Transition,
@@ -20,6 +24,8 @@ from agent import (
     action_name,
     load_transitions,
 )
+
+SUPPORTED_ALGORITHMS = ("cql", "q_learning")
 
 
 def split_dataset(
@@ -85,6 +91,24 @@ def to_tensors(transitions: Sequence[Transition], device: torch.device) -> Dict[
     }
 
 
+def conservative_q_regularizer(
+    q_values: torch.Tensor,
+    actions: torch.Tensor,
+    current_mask: torch.Tensor,
+    temperature: float,
+) -> torch.Tensor:
+    """Discrete CQL penalty: lower unseen/action-alternative Q values.
+
+    The dataset action should stay valuable, but the model is penalized when it
+    assigns high Q to other valid actions for the same protocol. This is the
+    practical offline-RL guardrail missing from plain fitted Q-learning.
+    """
+    q_selected = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+    masked_q = q_values.masked_fill(~current_mask, -1e9)
+    conservative_value = torch.logsumexp(masked_q / temperature, dim=1) * temperature
+    return (conservative_value - q_selected).mean()
+
+
 def evaluate(model: nn.Module, transitions: Sequence[Transition], device: torch.device) -> Dict[str, float]:
     if not transitions:
         return {
@@ -127,7 +151,7 @@ def evaluate(model: nn.Module, transitions: Sequence[Transition], device: torch.
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train offline RL agent from synthetic transitions.")
+    parser = argparse.ArgumentParser(description="Train offline RL agent from JSONL transitions.")
     parser.add_argument(
         "--dataset",
         type=Path,
@@ -140,25 +164,65 @@ def parse_args() -> argparse.Namespace:
         default=Path(__file__).resolve().parent / "artifacts" / "rl_agent_torch_linear.json",
         help="Output model path.",
     )
+    parser.add_argument(
+        "--algorithm",
+        choices=SUPPORTED_ALGORITHMS,
+        default="cql",
+        help="Offline RL algorithm. cql is the default; q_learning is kept as a baseline.",
+    )
     parser.add_argument("--epochs", type=int, default=40, help="Training epochs.")
     parser.add_argument("--gamma", type=float, default=0.96, help="Discount factor.")
     parser.add_argument("--learning-rate", type=float, default=0.003, help="Learning rate.")
     parser.add_argument("--l2", type=float, default=0.0005, help="L2 weight decay.")
+    parser.add_argument("--cql-alpha", type=float, default=0.50, help="CQL conservative penalty weight.")
+    parser.add_argument("--cql-temperature", type=float, default=1.0, help="CQL logsumexp temperature.")
+    parser.add_argument(
+        "--behavior-cloning-weight",
+        type=float,
+        default=0.50,
+        help=(
+            "Auxiliary supervised loss on dataset actions. "
+            "This keeps very small offline smoke-trains usable while the main objective remains CQL/Q-learning."
+        ),
+    )
+    parser.add_argument("--target-update-period", type=int, default=1, help="Epochs between target-network syncs.")
     parser.add_argument("--batch-size", type=int, default=256, help="Batch size for training.")
     parser.add_argument("--val-ratio", type=float, default=0.2, help="Validation split ratio.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--device", type=str, default="cpu", help="Torch device (default: cpu).")
+    parser.add_argument(
+        "--init-policy",
+        choices=("web_prior", "random"),
+        default="web_prior",
+        help=(
+            "Initial policy. web_prior seeds HTTP subtype weights from the state schema so short smoke-trains "
+            "remain usable; random trains from scratch."
+        ),
+    )
     parser.add_argument("--log-every", type=int, default=5, help="Epoch logging interval.")
     return parser.parse_args()
 
 
-def build_model(seed: int, device: torch.device) -> nn.Linear:
+def build_model(seed: int, device: torch.device, init_policy: str) -> nn.Linear:
     torch.manual_seed(seed)
     model = nn.Linear(STATE_DIM, len(ACTIONS)).to(device)
+    if init_policy == "web_prior":
+        with torch.no_grad():
+            model.weight.zero_()
+            model.bias.fill_(-1.0)
+            model.bias[ACTION_KEEP_NORMAL] = 0.25
+            model.bias[ACTION_ROUTE_SQLI] = 0.0
+            model.bias[ACTION_ROUTE_CMDI] = 0.0
+            model.bias[ACTION_ROUTE_SSTI] = 0.0
+            model.bias[ACTION_ROUTE_SSRF] = 0.0
+            model.weight[ACTION_ROUTE_SQLI, 7] = 5.0
+            model.weight[ACTION_ROUTE_CMDI, 8] = 5.0
+            model.weight[ACTION_ROUTE_SSTI, 9] = 5.0
+            model.weight[ACTION_ROUTE_SSRF, 10] = 5.0
     return model
 
 
-def export_model_json(model: nn.Linear, output_path: Path) -> None:
+def export_model_json(model: nn.Linear, output_path: Path, metadata: dict[str, object]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
         payload = {
@@ -170,6 +234,7 @@ def export_model_json(model: nn.Linear, output_path: Path) -> None:
             "metadata": {
                 "trained_with": "pytorch",
                 "model": f"nn.Linear({STATE_DIM}, {len(ACTIONS)})",
+                **metadata,
             },
         }
     with output_path.open("w", encoding="utf-8") as f:
@@ -183,6 +248,14 @@ def main() -> None:
         raise ValueError("--epochs must be > 0")
     if args.batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
+    if args.cql_alpha < 0.0:
+        raise ValueError("--cql-alpha must be >= 0")
+    if args.cql_temperature <= 0.0:
+        raise ValueError("--cql-temperature must be > 0")
+    if args.behavior_cloning_weight < 0.0:
+        raise ValueError("--behavior-cloning-weight must be >= 0")
+    if args.target_update_period <= 0:
+        raise ValueError("--target-update-period must be > 0")
     if not (0.0 < args.val_ratio < 0.9):
         raise ValueError("--val-ratio must be between 0 and 0.9")
 
@@ -199,7 +272,10 @@ def main() -> None:
 
     train_set, val_set = split_dataset(transitions, args.val_ratio, args.seed)
 
-    model = build_model(args.seed, device)
+    model = build_model(args.seed, device, args.init_policy)
+    target_model = build_model(args.seed, device, args.init_policy)
+    target_model.load_state_dict(model.state_dict())
+    target_model.eval()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.l2)
 
     train_tensors = to_tensors(train_set, device)
@@ -207,6 +283,8 @@ def main() -> None:
     print("Offline training started")
     print(f"- Dataset: {args.dataset}")
     print(f"- Device: {device}")
+    print(f"- Algorithm: {args.algorithm}")
+    print(f"- Init policy: {args.init_policy}")
     print(f"- Total transitions: {len(transitions)}")
     print(f"- Train transitions: {len(train_set)}")
     print(f"- Validation transitions: {len(val_set)}")
@@ -217,6 +295,9 @@ def main() -> None:
         random.Random(args.seed + epoch).shuffle(indices)
 
         epoch_loss_sum = 0.0
+        epoch_td_sum = 0.0
+        epoch_cql_sum = 0.0
+        epoch_bc_sum = 0.0
         epoch_samples = 0
 
         for offset in range(0, len(indices), args.batch_size):
@@ -228,18 +309,32 @@ def main() -> None:
             rewards = train_tensors["rewards"].index_select(0, batch)
             next_states = train_tensors["next_states"].index_select(0, batch)
             dones = train_tensors["dones"].index_select(0, batch)
+            current_mask = train_tensors["current_mask"].index_select(0, batch)
             next_mask = train_tensors["next_mask"].index_select(0, batch)
 
             q_values = model(states)
             q_selected = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
             with torch.no_grad():
-                q_next = model(next_states)
+                q_next = target_model(next_states)
                 q_next = q_next.masked_fill(~next_mask, -1e9)
                 max_next = q_next.max(dim=1).values
                 targets = rewards + (1.0 - dones) * args.gamma * max_next
 
-            loss = F.mse_loss(q_selected, targets)
+            td_loss = F.mse_loss(q_selected, targets)
+            cql_loss = torch.zeros((), dtype=torch.float32, device=device)
+            if args.algorithm == "cql":
+                cql_loss = conservative_q_regularizer(
+                    q_values=q_values,
+                    actions=actions,
+                    current_mask=current_mask,
+                    temperature=args.cql_temperature,
+                )
+
+            masked_logits = q_values.masked_fill(~current_mask, -1e9)
+            bc_loss = F.cross_entropy(masked_logits, actions)
+
+            loss = td_loss + args.cql_alpha * cql_loss + args.behavior_cloning_weight * bc_loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -248,9 +343,18 @@ def main() -> None:
 
             batch_size = len(batch_indices)
             epoch_loss_sum += float(loss.item()) * batch_size
+            epoch_td_sum += float(td_loss.item()) * batch_size
+            epoch_cql_sum += float(cql_loss.item()) * batch_size
+            epoch_bc_sum += float(bc_loss.item()) * batch_size
             epoch_samples += batch_size
 
         mse = epoch_loss_sum / float(max(1, epoch_samples))
+        td_mse = epoch_td_sum / float(max(1, epoch_samples))
+        cql_penalty = epoch_cql_sum / float(max(1, epoch_samples))
+        bc_penalty = epoch_bc_sum / float(max(1, epoch_samples))
+
+        if epoch % args.target_update_period == 0:
+            target_model.load_state_dict(model.state_dict())
 
         should_log = epoch == 1 or epoch == args.epochs or (epoch % args.log_every == 0)
         if should_log:
@@ -259,13 +363,26 @@ def main() -> None:
             print(
                 "Epoch"
                 f" {epoch:03d}"
-                f" | mse={mse:.5f}"
+                f" | loss={mse:.5f}"
+                f" | td_mse={td_mse:.5f}"
+                f" | cql={cql_penalty:.5f}"
+                f" | bc={bc_penalty:.5f}"
                 f" | train_acc={train_metrics['accuracy']:.3f}"
                 f" | val_acc={val_metrics['accuracy']:.3f}"
                 f" | val_proxy_reward={val_metrics['avg_proxy_reward']:.3f}"
             )
 
-    export_model_json(model, args.output)
+    training_metadata = {
+        "algorithm": args.algorithm,
+        "gamma": args.gamma,
+        "cql_alpha": args.cql_alpha if args.algorithm == "cql" else 0.0,
+        "cql_temperature": args.cql_temperature,
+        "behavior_cloning_weight": args.behavior_cloning_weight,
+        "init_policy": args.init_policy,
+        "target_update_period": args.target_update_period,
+        "dataset": str(args.dataset),
+    }
+    export_model_json(model, args.output, training_metadata)
 
     final_train = evaluate(model, train_set, device)
     final_val = evaluate(model, val_set, device)
@@ -276,10 +393,16 @@ def main() -> None:
             {
                 "dataset": str(args.dataset),
                 "model": str(args.output),
+                "algorithm": args.algorithm,
                 "epochs": args.epochs,
                 "gamma": args.gamma,
                 "learning_rate": args.learning_rate,
                 "l2": args.l2,
+                "cql_alpha": args.cql_alpha if args.algorithm == "cql" else 0.0,
+                "cql_temperature": args.cql_temperature,
+                "behavior_cloning_weight": args.behavior_cloning_weight,
+                "init_policy": args.init_policy,
+                "target_update_period": args.target_update_period,
                 "batch_size": args.batch_size,
                 "device": str(device),
                 "train_metrics": final_train,

@@ -92,17 +92,31 @@ Mask được enforce bởi `allowed_action_indices()` khi inference và khi tí
 
 ## 4) Thuật toán RL hiện tại
 
-Implementation hiện tại là offline Q-learning với mô hình tuyến tính trên PyTorch:
+Implementation hiện tại dùng **Discrete Conservative Q-Learning (CQL)** cho offline RL với action space rời rạc:
 
 - Mô hình: `Q(s, a) = w_a^T s + b_a`
 - Kiến trúc runtime hiện tại: `nn.Linear(16, 8)` / JSON linear weights 16D.
 - Tối ưu: `AdamW` + weight decay (`l2`) + gradient clipping.
-- Loss: `MSE(Q(s,a), target)`.
+- Loss chính: Bellman TD loss `MSE(Q(s,a), target)`.
+- Loss bảo thủ CQL: `logsumexp(Q(s, a_hop_le)) - Q(s, a_dataset)`.
+- Auxiliary behavior loss: cross entropy trên action trong dataset/replay buffer.
+- Tổng loss: `TD loss + cql_alpha * CQL loss + behavior_cloning_weight * BC loss`.
+- Init mặc định: `--init-policy web_prior`, seed weight cho HTTP subtype scores 7-10 trước khi fine-tune. Điều này làm smoke-train vài epoch vẫn route đúng SQLi/CMDi/SSTI/SSRF theo schema, nhưng vẫn cho phép train from scratch bằng `--init-policy random`.
 
 Target cho từng transition `(s, a, r, s', done)`:
 - Nếu `done`: `y = r`
 - Nếu chưa done:
   - `y = r + gamma * max_{a' hop le theo protocol(s')} Q(s', a')`
+
+CQL được chọn thay cho plain Q-learning vì dữ liệu của hệ thống là offline replay buffer từ log, không có môi trường động để agent tự explore. CQL giảm xu hướng overestimate các action chưa/ít xuất hiện trong dataset, phù hợp với bài toán route attacker sang honeypot khi action sai có thể làm giảm engagement.
+
+Script vẫn giữ baseline Q-learning cũ để so sánh:
+
+```bash
+python control_plane/rl_agent/train_offline.py \
+  --algorithm q_learning \
+  --dataset control_plane/rl_agent/data/replay_buffer.jsonl
+```
 
 Sau khi train, model được export về JSON (`weights`, `bias`) để runtime controller sử dụng.
 
@@ -139,6 +153,59 @@ Hoặc dùng Makefile:
 make gen-fake-data
 ```
 
+## 6.1) Export replay buffer từ runtime logs
+
+Sau khi chạy demo/adaptive flow, có thể xuất transition thật hơn từ Elasticsearch:
+
+```bash
+make export-replay-buffer
+```
+
+Target này gọi:
+
+```bash
+python control_plane/replay_buffer/export_replay_buffer.py \
+  --output control_plane/rl_agent/data/replay_buffer.jsonl
+```
+
+Replay exporter đọc các event:
+- `rl_state_decision` từ `llm_analyzer`: `state_t`, `decision_id`, window, semantic scores, action/backend.
+- `route_decision` từ `routing_controller`: action/backend thực tế, `allowed_actions`, route applied.
+- `gateway_request`, `request`, `honeypot_interaction`: outcome sau decision để tính reward engagement.
+
+Transition output có format:
+
+```json
+{
+  "session_id": "sid_demo",
+  "decision_id": "abc123",
+  "step": 0,
+  "protocol": "http",
+  "state_schema": "rl_state_v2_16",
+  "state": [0.0],
+  "action": 1,
+  "reward": 1.25,
+  "next_state": [0.1],
+  "done": false,
+  "optimal_action": 1
+}
+```
+
+Reward builder hiện là heuristic từ log thật:
+- Thưởng route đúng honeypot theo target score.
+- Thưởng honeypot engagement: request tiếp tục vào đúng pot, dwell time, `engagement_depth_norm` tăng, `attack_progression_stage` tăng.
+- Phạt false positive benign -> honeypot.
+- Phạt giữ normal khi evidence attack mạnh.
+- Phạt route sai honeypot hoặc không có follow-up sau khi route.
+
+Train từ replay buffer:
+
+```bash
+make train-rl-replay
+```
+
+Lưu ý: reward này là bản thực dụng cho dataset offline ban đầu, chưa phải hàm reward cuối cùng của khóa luận. Khi benchmark engagement rõ hơn, nên chỉnh reward weights và thêm contract-mismatch metric.
+
 Output mong đợi:
 - File JSONL, mỗi dòng 1 transition.
 - Các trường: `state`, `action`, `reward`, `next_state`, `done`, `protocol`, `optimal_action`.
@@ -151,14 +218,43 @@ Từ `adaptive_honeypot_system/`:
 python control_plane/rl_agent/train_offline.py \
   --dataset control_plane/rl_agent/data/fake_transitions.jsonl \
   --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
+  --algorithm cql \
+  --cql-alpha 0.50 \
+  --cql-temperature 1.0 \
+  --behavior-cloning-weight 0.50 \
+  --init-policy web_prior \
   --epochs 40 \
   --log-every 5
+```
+
+Smoke-train local vài epoch bằng venv root repo:
+
+```bash
+cd adaptive_honeypot_system
+source ../.venv/bin/activate
+python control_plane/rl_agent/train_offline.py \
+  --dataset control_plane/rl_agent/data/fake_transitions_tiny.jsonl \
+  --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
+  --algorithm cql \
+  --epochs 5 \
+  --learning-rate 0.005 \
+  --cql-alpha 0.20 \
+  --behavior-cloning-weight 1.00 \
+  --init-policy web_prior \
+  --log-every 1
 ```
 
 Hoặc dùng Makefile:
 
 ```bash
 make train-rl
+```
+
+Makefile mặc định dùng CQL. Có thể override để so sánh baseline:
+
+```bash
+make train-rl-replay RL_ALGORITHM=cql CQL_ALPHA=0.50 CQL_TEMPERATURE=1.0
+make train-rl-replay RL_ALGORITHM=q_learning
 ```
 
 Sinh data + train trong 1 lệnh:
@@ -215,6 +311,8 @@ Theo dõi log train và metrics:
 - `train_acc`
 - `val_acc`
 - `val_proxy_reward`
+- `td_mse`
+- `cql`
 
 Mức tối thiểu:
 - Không có runtime exception.
@@ -343,7 +441,7 @@ Script sẽ:
 
 - `llm_analyzer` đã gọi Groq khi có key, có rule fallback/guardrail khi provider lỗi hoặc LLM bỏ sót payload rõ ràng; phần còn lại là provider abstraction, retry/backoff, và memory decay.
 - Runtime state đã là `rl_state_v2_16`.
-- Mô hình hiện tại là linear Q approximation/Torch stub, chưa phải DQN/BCQ đầy đủ.
+- Mô hình train hiện tại là linear Discrete CQL. Chưa phải BCQ/DQN sâu, nhưng đã là offline RL bảo thủ phù hợp hơn plain Q-learning cho replay buffer log.
 - Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
 - Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.
 
@@ -351,5 +449,5 @@ Script sẽ:
 
 - Tách feature computation còn nằm trong analyzer sang state builder package.
 - Tách rule fallback/guardrail của LLM analyzer thành module testable riêng.
-- Train trên replay buffer tách từ traffic logs.
+- Tune CQL hyperparameters (`cql_alpha`, `gamma`, reward weights) trên replay buffer tách từ traffic logs.
 - Thêm integration test đầy đủ: `log ingest -> state build -> RL decide -> routing update`.

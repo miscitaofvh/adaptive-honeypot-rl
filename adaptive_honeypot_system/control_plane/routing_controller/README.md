@@ -9,6 +9,7 @@ Chuc nang:
 - Nhan runtime state vector qua `/decide`.
 - Chon action/backend va cap nhat session/IP map bang `gateway/routing_update.sh`.
 - Expose route inspection endpoints trong debug mode de test.
+- Log `route_decision` events kem `decision_id`, state/action/backend va allowed actions de replay-buffer exporter co the reconstruct action_t.
 
 Endpoints:
 
@@ -36,3 +37,4 @@ Luu y:
 
 - L4 routing dang bi disable bang `L4_ROUTING_ENABLED=false`.
 - Non-HTTP backend placeholders se bi reject cho toi khi HAProxy TCP/L4 duoc implement.
+- Control-plane JSON events duoc gui sang Filebeat UDP khi `CONTROL_PLANE_SYSLOG=true`. Cac bien lien quan: `FILEBEAT_HOST`, `FILEBEAT_SERVICE_PORT`.

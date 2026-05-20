@@ -1,6 +1,6 @@
 # Ke hoach hoan thien Adaptive Honeypot RL
 
-Ngay cap nhat: 2026-05-07
+Ngay cap nhat: 2026-05-20
 
 Muc dich cua file nay: lam tai lieu dieu huong cho cac lan implement tiep theo. Neu Codex quay lai repo nay, doc file nay truoc `README.md`, `Progress.md`, va `proposal.md`, sau do lam theo thu tu o muc "Next execution plan".
 
@@ -17,6 +17,7 @@ Trang thai sau khi pull/scan 2026-05-07:
 - LLM analyzer da co Groq API integration va rule-based fallback khi thieu API key/timeout de route cac Web attack ro rang.
 - RL policy that chua implement. Hien tai Web MVP van dua vao `RL_POLICY_MODE=heuristic`, dummy JSON model, hoac Torch `rl_agent` web_policy/one-epoch stub de export artifact dung format.
 - Runtime code da migrate sang `rl_state_v2_16` (`STATE_DIM=16`) trong analyzer, routing controller, RL agent, dummy model scripts va synthetic data generator.
+- Replay pipeline da co: analyzer log `rl_state_decision`, controller log `route_decision` kem state/decision_id, exporter tao replay buffer JSONL tu Elasticsearch/runtime logs.
 - L4 SSH/FTP/SMTP Drop-and-Catch chua implement. Controller/gateway da fail ro rang neu dung L4 placeholder.
 - Route maps duoc clear sau E2E tests de tranh stale state.
 - Da co `EXPOSURE_MODE=debug|attack`: debug giu operator endpoints/metadata; attack an service identity, route debug APIs, docs/OpenAPI, va HAProxy Stats UI. Analyzer debug endpoint `/analyze` khong con trong source hien tai.
@@ -30,7 +31,10 @@ make test-adaptive-web
 make test-adaptive-attacks
 make test-rl-split-ip
 make test-honeypots
+make test-routes
 make validate
+make export-replay-buffer
+make train-rl-replay
 ```
 
 Ket qua quan trong:
@@ -49,6 +53,8 @@ Ket qua quan trong:
   - Client B -> `real-backend`.
 - `make test-honeypots`: PASS cho CMDI/SQLI/SSTI/SSRF health va detection.
 - `make validate`: PASS syntax check, controller health, honeypot tests, core route smoke.
+- `make export-replay-buffer`: PASS, doc duoc decision/state/outcome events tu Elasticsearch va ghi `control_plane/rl_agent/data/replay_buffer.jsonl`.
+- `make train-rl-replay`: PASS trong Docker `rl_agent` container, doc replay buffer va xuat `control_plane/rl_agent/artifacts/rl_agent_linear.json`.
 - Route maps sau test sach:
   - `session_routes={}`
   - `ip_routes={}`
@@ -59,13 +65,13 @@ Ket qua quan trong:
 | --- | --- | --- | --- |
 | Web data plane | DONE for MVP | HAProxy normal/honeypot mode, session/IP route maps, 4 web honeypot, real backend/frontend | Benchmark multi-session, contract tests chuan hon |
 | Real backend contract | DONE for MVP | Them `POST /api/articles/search`, frontend client `searchArticles`, DB init lock | Formal contract pytest suite, more edge cases |
-| Routing controller | DONE for MVP | `/decide`, model reload/debug endpoints, heuristic mode, backend validation, inspect routes, `DELETE /routes`, L4 disabled 501, attack-mode endpoint hiding | Unit tests, route history store, policy cooldown in controller, migrate `/decide` state schema v2 |
+| Routing controller | DONE for MVP | `/decide`, model reload/debug endpoints, heuristic mode, backend validation, inspect routes, `DELETE /routes`, L4 disabled 501, attack-mode endpoint hiding, replay-friendly `route_decision` logs | Unit tests, route history store, policy cooldown in controller |
 | Demo exposure surface | DONE for MVP | `EXPOSURE_MODE=debug|attack`, generic health in attack mode, `/routes` hidden, analyzer debug injection endpoint removed, HAProxy Stats UI disabled | Network-level compose override to publish only gateway in attack demo |
 | Gateway route updates | DONE for MVP | Idempotent map update/remove, clear all maps, `drop_connection` fail ro rang | L4 drop implementation neu chon lam Phase 8 |
-| Structured logging | DONE for MVP | JSON logs cho backend/honeypots, request/session/body preview, masking co ban | Gateway selected-backend parsing, Kibana dashboard |
-| Filebeat/ES | DONE for MVP | Docker log ingest, JSON decode, bo hardcoded container IDs, giu controller/analyzer logs | Saved searches/dashboard, retention/index template polish |
-| LLM analyzer | PARTIAL DONE | Poll ES, defer/enrich body_preview, call Groq or rule fallback, rule guardrail, validate semantic JSON, build state v2, call controller | State builder package polish, memory durable/decay, input summary hygiene |
-| Dummy/Torch RL stub | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime, Torch `rl_agent` service `/predict` `/export` `/train/one-epoch` | Real replay buffer, reward, train/evaluate policy |
+| Structured logging | DONE for MVP | JSON logs cho backend/honeypots/control-plane, request/session/body preview, masking co ban, replay decision/state logs | Gateway selected-backend parsing, Kibana dashboard |
+| Filebeat/ES | DONE for MVP | UDP ingest cho HAProxy/service/control-plane JSON events, JSON decode, bo hardcoded container IDs | Saved searches/dashboard, retention/index template polish |
+| LLM analyzer | PARTIAL DONE | Poll ES, defer/enrich body_preview, call Groq or rule fallback, rule guardrail, validate semantic JSON, build state v2, call controller, log `rl_state_decision` | State builder package polish, memory durable/decay, input summary hygiene |
+| Dummy/Torch RL stub | DONE for MVP | `RL_POLICY_MODE=heuristic`, dummy web model generator, JSON LinearQ runtime, Torch `rl_agent` service `/predict` `/export` `/train/one-epoch`, replay exporter/reward builder | Train/evaluate policy tren replay data that |
 | RL state schema | DONE for runtime | `rl_state_v2_16`, protocol de ngoai tensor lam metadata/action-mask context, code runtime da dung 16D | Unit tests/schema package polish, replay artifacts moi |
 | L4 Drop-and-Catch | NOT STARTED | Disabled safely | SSH/FTP/SMTP data plane, honeypots, reconnect tests |
 | Benchmark/research metrics | NOT STARTED | E2E smoke tests only | RQ metrics, attack drivers, adaptive vs static/rule comparison |
@@ -84,6 +90,7 @@ Done:
   - Calls Groq (`GROQ_API_KEY`, default model `llama-3.3-70b-versatile`) for semantic extraction.
   - Validates/clamps LLM output fields.
   - Builds current runtime state v2 16D and calls routing controller `/decide`.
+  - Logs replay-friendly `rl_state_decision` for every analyzed window, including `KEEP_NORMAL`.
   - `EXPOSURE_MODE=attack` hides docs/OpenAPI and detailed health stats.
 
 - `adaptive_honeypot_system/control_plane/llm_analyzer/test_adaptive_web_flow.sh`
@@ -102,7 +109,14 @@ Done:
   - Adds route cleanup:
     - `DELETE /routes`
   - Logs route decisions as structured JSON.
+  - Includes `decision_id`, state vector, window metadata and allowed actions in `route_decision`.
   - `EXPOSURE_MODE=attack` hides operator/debug endpoints with 404 and keeps generic `/health`.
+
+- `adaptive_honeypot_system/control_plane/replay_buffer/export_replay_buffer.py`
+  - Reads Elasticsearch or local JSONL events.
+  - Joins decision/state logs with gateway/backend/honeypot outcome logs by session/window.
+  - Computes engagement-oriented proxy reward.
+  - Writes JSONL transitions compatible with `train_offline.py`.
 
 - `adaptive_honeypot_system/control_plane/rl_agent/create_dummy_web_policy_model.py`
   - Creates deterministic subtype-based dummy web model artifact.
@@ -117,7 +131,7 @@ Remaining:
 
 - Redis or durable memory with decay and session history.
 - Formal state builder package using `rl_state_v2_16`.
-- Real replay buffer extraction and RL evaluation.
+- Tune reward weights and evaluate RL policy on exported replay data.
 
 ### 4.2 Gateway
 
@@ -212,7 +226,6 @@ Remaining:
 - `make test-e2e`
 - `make benchmark-web`
 - `make benchmark-report`
-- `make extract-replay-buffer`
 - `make evaluate-rl`
 
 ## 5) Done checklist by phase
@@ -386,8 +399,8 @@ Status: DONE for single-attack Web MVP, incomplete for research benchmark.
 - [x] Migrate adaptive flow to `rl_state_v2_16`.
 - [ ] Multi-attack same session route-shift demo.
 - [ ] Benign-session no-reroute benchmark.
-- [ ] Dry-run report/replay mode.
-- [ ] Route decision history suitable for replay buffer.
+- [x] Replay-buffer export mode from ES/local JSONL exists.
+- [x] Route decision history suitable for replay buffer.
 
 Remaining detail:
 
@@ -399,7 +412,7 @@ Remaining detail:
 
 ### Phase 6 - Real RL dataset, reward, training, evaluation
 
-Status: NOT STARTED, except synthetic/bootstrap code.
+Status: PARTIAL DONE. Synthetic/bootstrap code exists, and runtime replay-buffer export now exists; full RL evaluation/training quality is still pending.
 
 Already present:
 
@@ -408,12 +421,14 @@ Already present:
 - [x] PyTorch offline training script.
 - [x] JSON artifact loading in controller.
 - [x] Dummy model generators.
+- [x] Replay buffer exporter from runtime logs.
+- [x] Engagement-oriented proxy reward builder.
 
 Not done:
 
-- [ ] Extract replay buffer from real/demo logs.
-- [ ] Define transition schema version.
-- [ ] Define proposal-aligned reward.
+- [x] Extract replay buffer from real/demo logs.
+- [x] Define transition schema version through `state_schema=rl_state_v2_16` and JSONL transition fields.
+- [x] Define initial proposal-aligned proxy reward.
 - [ ] Evaluate policy against benchmark sessions.
 - [ ] Add artifact metadata.
 - [ ] Compare heuristic vs learned policy.
@@ -569,9 +584,9 @@ Goal: tao du lieu cho benchmark va RL replay buffer.
 
 Tasks:
 
-- [ ] Add decision ID.
-- [ ] Add state hash.
-- [ ] Log analyzer decision with:
+- [x] Add decision ID.
+- [x] Add deterministic state/window-based decision ID.
+- [x] Log analyzer decision with:
   - session_id
   - source_ip
   - protocol
@@ -581,17 +596,19 @@ Tasks:
   - reason
   - apply_route
   - route result
-- [ ] Controller route_decision log includes enough fields to join with analyzer decision.
+- [x] Controller route_decision log includes enough fields to join with analyzer decision.
 - [ ] Optional: expose `GET /decisions/recent` in controller or analyzer for demo/debug.
 
 Acceptance:
 
-- After adaptive test, ES contains app docs for:
+- [x] After adaptive test, ES contains app docs for:
   - backend request.
   - analyzer decision.
   - controller route decision.
   - honeypot interaction.
-- Route decision docs can be grouped by `session_id`.
+- [x] Route decision docs can be grouped by `session_id`.
+- [x] `app.ts` uses unix epoch integer so it does not conflict with gateway/backend logs.
+- [x] Logged `state` is replay-export-safe in Elasticsearch; exporter converts it back to floats.
 
 ### Step D - Web benchmark runner
 
@@ -634,15 +651,15 @@ Already done for stub phase:
 - [x] Export model artifact in controller JSON format.
 - [x] Provide one-epoch proxy train endpoint without full train.
 
-Files to create:
+Files created / pending:
 
-- `adaptive_honeypot_system/control_plane/rl_agent/extract_replay_buffer.py`
+- `adaptive_honeypot_system/control_plane/replay_buffer/export_replay_buffer.py`
 - `adaptive_honeypot_system/control_plane/rl_agent/evaluate_policy.py`
-- `adaptive_honeypot_system/control_plane/rl_agent/reward.py`
+- Optional future split: `adaptive_honeypot_system/control_plane/rl_agent/reward.py`
 
 Tasks:
 
-- [ ] Define transition schema:
+- [x] Define transition schema:
   - schema_version
   - state
   - action
@@ -653,8 +670,9 @@ Tasks:
   - session_id/source_ip
   - attack_label optional
   - window_start/window_end
-- [ ] Extract transitions from benchmark logs.
-- [ ] Implement reward aligned to engagement.
+- [x] Extract transitions from runtime/benchmark logs.
+- [x] Implement initial reward aligned to engagement.
+- [x] `make train-rl-replay` runs inside Docker `rl_agent` so host does not need local Torch.
 - [ ] Evaluate heuristic policy as baseline.
 - [ ] Evaluate trained linear policy.
 - [ ] Add artifact metadata:
@@ -665,7 +683,8 @@ Tasks:
 
 Acceptance:
 
-- `make extract-replay-buffer` writes JSONL.
+- [x] `make export-replay-buffer` writes JSONL.
+- [x] `make train-rl-replay` trains from exported JSONL and writes model artifact.
 - `make evaluate-rl` writes metrics JSON.
 - Controller can load generated artifact.
 - README/RL guide explains synthetic vs replay dataset clearly.
@@ -737,15 +756,16 @@ Already satisfied:
 
 - [x] Normal mode benign traffic reaches real backend.
 - [x] Single SQLi adaptive test routes to SQLI honeypot.
+- [x] CMDI/SSTI/SSRF adaptive E2E tests route to matching endpoint-scoped honeypots.
 - [x] Frontend/API core contract does not break in smoke tests.
 - [x] ES/Filebeat/analyzer/controller path works.
+- [x] Replay-buffer exporter can build `(state, action, reward, next_state, done)` from runtime logs.
 - [x] Request-path containers avoid PyTorch; `rl_agent` intentionally contains Torch.
 - [x] README demo commands are present.
 
 Still needed before claiming research-complete Web MVP:
 
 - [ ] Benign benchmark shows no false reroute.
-- [ ] CMDI/SSTI/SSRF adaptive E2E tests, not just direct honeypot tests.
 - [ ] Multi-attack same-session policy tested.
 - [ ] Metrics report exists.
 - [ ] Pipeline latency measured.

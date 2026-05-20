@@ -10,6 +10,7 @@ Kiến trúc hiện tại:
 - Lớp honeypot web: CMDI, SQLI, SSTI, SSRF.
 - Control plane: FastAPI routing controller + RL model loading/inference + Torch RL agent service để export model artifact.
 - AI loop: LLM analyzer đọc log từ Elasticsearch, gọi Groq khi có API key, dựng state runtime hiện tại và gọi controller.
+- Replay loop: analyzer/controller log `rl_state_decision`/`route_decision`, exporter dựng `(state_t, action_t, reward_t, next_state_t, done)` cho offline RL.
 - Observability: Filebeat -> Elasticsearch -> Kibana.
 
 Nguyên tắc quan trọng: control plane chạy bất đồng bộ với luồng request, không chen đường đồng bộ vào request path.
@@ -30,6 +31,7 @@ Nguyên tắc quan trọng: control plane chạy bất đồng bộ với luồn
 - Analyzer hiện có Groq integration (`GROQ_API_KEY`, mặc định model `llama-3.3-70b-versatile`) và rule-based fallback khi thiếu key/provider lỗi để Web flow vẫn route được các attack rõ ràng.
 - Đã có dummy heuristic RL mode (`RL_POLICY_MODE=heuristic`) để route theo subtype score.
 - Đã có bộ RL offline + dummy model để test route có tính lặp lại.
+- Đã có replay-buffer exporter từ runtime logs và `train_offline.py` mặc định dùng Discrete CQL cho offline RL; Q-learning cũ còn giữ làm baseline.
 - Đã có `rl_agent` service dùng Torch, chạy debug/attack mode, hỗ trợ predict/debug, export artifact JSON và one-epoch proxy train rất nhỏ. Service này không nằm trên request path và không full train.
 - Runtime code đã dùng `rl_state_v2_16` (`STATE_DIM = 16`) trong analyzer, routing controller, RL agent, dummy model và synthetic data generator.
 - Đã có script test honeypot độc lập (`test_honeypots.py`) + Make target.
@@ -154,6 +156,28 @@ Metadata `/decide` đi kèm state:
   "source_ip": "172.22.0.10",
   "apply_route": true
 }
+```
+
+## 6.4) Replay buffer cho offline RL
+
+Control plane hiện ghi hai event quan trọng vào Elasticsearch qua Filebeat UDP:
+
+- `rl_state_decision`: analyzer snapshot `state_t`, semantic scores, window metadata và action/backend được chọn.
+- `route_decision`: routing controller ghi action/backend thực tế, `allowed_actions`, route applied.
+
+Xuất replay buffer:
+
+```bash
+cd adaptive_honeypot_system
+make export-replay-buffer
+```
+
+Output mặc định: `control_plane/rl_agent/data/replay_buffer.jsonl`.
+
+Train từ replay buffer:
+
+```bash
+make train-rl-replay
 ```
 
 ## 7) Chạy nhanh

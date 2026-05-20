@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data train-rl train-rl-fresh make-dummy-model make-dummy-web-model rl-agent-export rl-agent-one-epoch clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data export-replay-buffer train-rl train-rl-replay train-rl-fresh make-dummy-model make-dummy-web-model rl-agent-export rl-agent-one-epoch clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -7,7 +7,15 @@ DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 GATEWAY_URL := http://localhost:18080
 RL_AGENT_URL := http://localhost:8003
 RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
+RL_REPLAY_BUFFER := control_plane/rl_agent/data/replay_buffer.jsonl
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
+RL_DATASET_CONTAINER := /app/control_plane/rl_agent/data/fake_transitions.jsonl
+RL_REPLAY_BUFFER_CONTAINER := /app/control_plane/rl_agent/data/replay_buffer.jsonl
+RL_MODEL_CONTAINER := /app/control_plane/rl_agent/artifacts/rl_agent_linear.json
+RL_ALGORITHM := cql
+CQL_ALPHA := 0.50
+CQL_TEMPERATURE := 1.0
+RL_TARGET_UPDATE_PERIOD := 1
 EXPOSURE_SERVICES := gateway backend cmdi_pot sqli_pot ssti_pot ssrf_pot routing_controller llm_analyzer rl_agent
 
 # Colors for output
@@ -66,7 +74,9 @@ help:
 	@echo ""
 	@echo "$(YELLOW)RL TRAINING:$(RESET)"
 	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate synthetic transitions for offline RL"
+	@echo "  $(CYAN)export-replay-buffer$(RESET) Export runtime logs to offline RL replay buffer"
 	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent from synthetic dataset"
+	@echo "  $(CYAN)train-rl-replay$(RESET)    Train RL agent from exported replay buffer"
 	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model end-to-end"
 	@echo "  $(CYAN)make-dummy-model$(RESET)   Build deterministic dummy model (always SSTI for HTTP)"
 	@echo "  $(CYAN)make-dummy-web-model$(RESET) Build deterministic subtype-based web dummy model"
@@ -306,9 +316,31 @@ gen-fake-data:
 	@echo "$(CYAN)[Generating synthetic RL dataset...]$(RESET)"
 	@python control_plane/rl_agent/generate_fake_data.py --output $(RL_DATASET)
 
+export-replay-buffer:
+	@echo "$(CYAN)[Exporting replay buffer from runtime logs...]$(RESET)"
+	@python control_plane/replay_buffer/export_replay_buffer.py --output $(RL_REPLAY_BUFFER)
+
 train-rl:
 	@echo "$(CYAN)[Training offline RL agent...]$(RESET)"
-	@python control_plane/rl_agent/train_offline.py --dataset $(RL_DATASET) --output $(RL_MODEL)
+	@$(DOCKER_COMPOSE) run --rm --no-deps -u "$$(id -u):$$(id -g)" rl_agent \
+		python -B train_offline.py \
+		--dataset $(RL_DATASET_CONTAINER) \
+		--output $(RL_MODEL_CONTAINER) \
+		--algorithm $(RL_ALGORITHM) \
+		--cql-alpha $(CQL_ALPHA) \
+		--cql-temperature $(CQL_TEMPERATURE) \
+		--target-update-period $(RL_TARGET_UPDATE_PERIOD)
+
+train-rl-replay:
+	@echo "$(CYAN)[Training offline RL agent from replay buffer...]$(RESET)"
+	@$(DOCKER_COMPOSE) run --rm --no-deps -u "$$(id -u):$$(id -g)" rl_agent \
+		python -B train_offline.py \
+		--dataset $(RL_REPLAY_BUFFER_CONTAINER) \
+		--output $(RL_MODEL_CONTAINER) \
+		--algorithm $(RL_ALGORITHM) \
+		--cql-alpha $(CQL_ALPHA) \
+		--cql-temperature $(CQL_TEMPERATURE) \
+		--target-update-period $(RL_TARGET_UPDATE_PERIOD)
 
 train-rl-fresh: gen-fake-data train-rl
 	@echo "$(GREEN)✓ RL dataset + training completed$(RESET)"
@@ -383,6 +415,8 @@ validate:
 		control_plane/rl_agent/service.py \
 		control_plane/rl_agent/create_dummy_ssti_model.py \
 		control_plane/rl_agent/create_dummy_web_policy_model.py \
+		control_plane/replay_buffer/__init__.py \
+		control_plane/replay_buffer/export_replay_buffer.py \
 		control_plane/routing_controller/main.py \
 		control_plane/llm_analyzer/analyzer.py
 	@echo "$(GREEN)✓ Syntax check complete$(RESET)"

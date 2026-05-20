@@ -146,6 +146,7 @@ services:
       - RL_MODEL_OUTPUT_PATH=/app/control_plane/rl_agent/artifacts/rl_agent_linear.json
     volumes:
       - ./control_plane/rl_agent/artifacts:/app/control_plane/rl_agent/artifacts
+      - ./control_plane/rl_agent/data:/app/control_plane/rl_agent/data
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -170,6 +171,9 @@ services:
       - ROUTING_UPDATE_SCRIPT=/app/gateway/routing_update.sh
       - ROUTING_COMMAND_TIMEOUT=5
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
+      - CONTROL_PLANE_SYSLOG=${CONTROL_PLANE_SYSLOG:-true}
     volumes:
       - ./control_plane/rl_agent/artifacts:/app/control_plane/rl_agent/artifacts
       - haproxy_maps:/etc/haproxy/maps
@@ -205,6 +209,9 @@ services:
       - SERVICE_BODY_CACHE_SECONDS=${SERVICE_BODY_CACHE_SECONDS:-120}
       - SERVICE_BODY_WAIT_SECONDS=${SERVICE_BODY_WAIT_SECONDS:-15}
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
+      - FILEBEAT_HOST=filebeat
+      - FILEBEAT_SERVICE_PORT=5141
+      - CONTROL_PLANE_SYSLOG=${CONTROL_PLANE_SYSLOG:-true}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
     depends_on:

@@ -1,6 +1,6 @@
 # Báo cáo tiến độ
 
-Cập nhật: 2026-05-07
+Cập nhật: 2026-05-20
 
 ## 1) Tổng quan hiện tại
 
@@ -8,7 +8,7 @@ Dự án đã hoạt động đủ cho data plane + control plane trong web scop
 - Data plane: gateway HAProxy + real backend/frontend + 4 web honeypot.
 - Exposure mode: `debug` cho operator/test, `attack` cho demo attacker-facing.
 - Control plane: routing controller FastAPI chạy runtime, cập nhật route map theo session/IP.
-- RL: đã tách rõ controller inference không Torch, train offline local, và `rl_agent` Torch service riêng cho debug/export/one-epoch proxy train. Web MVP có dummy heuristic RL mode. Runtime code đã migrate sang `rl_state_v2_16`.
+- RL: đã tách rõ controller inference không Torch, train offline local/container, và `rl_agent` Torch service riêng cho debug/export/one-epoch proxy train. Web MVP có dummy heuristic RL mode. Runtime code đã migrate sang `rl_state_v2_16`. Đã có replay-buffer exporter từ runtime logs và `train_offline.py` mặc định dùng Discrete CQL cho offline RL.
 - LLM analyzer: service poll Elasticsearch, gọi Groq API (Llama 3.3 70B) hoặc rule fallback để trích xuất semantic features, dựng state v2 16D và gọi routing controller bất đồng bộ.
 - Observability: Filebeat -> Elasticsearch -> Kibana hoạt động. Service-level syslog forwarding thu thập HTTP request body từ backend/honeypot.
 - State hiện tại: `rl_state_v2_16`, giảm từ 24D xuống 16D, giữ `protocol` ngoài tensor làm metadata của `/decide` để mở rộng SSH/FTP/SMTP bằng action masking.
@@ -43,6 +43,8 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] Chặn non-HTTP/L4 placeholder khi `L4_ROUTING_ENABLED=false`.
 - [x] Thêm `llm_analyzer` service (`/health`) cho flow `log -> state -> decide -> route`.
 - [x] Migrate runtime từ state v1 24D sang `rl_state_v2_16`.
+- [x] Thêm `rl_state_decision` logging trong analyzer và `route_decision` logging có state/decision_id trong routing controller.
+- [x] Thêm replay-buffer exporter dựng `(state_t, action_t, reward_t, next_state_t, done)` từ Elasticsearch/runtime logs.
 - [x] Split-IP E2E `test_two_ip_split_routing.sh` pass với route honeypot theo endpoint, không route toàn bộ API của IP.
 
 ### Logging pipeline
@@ -53,6 +55,10 @@ Control plane tiếp tục được giữ theo nguyên tắc bất đồng bộ,
 - [x] HTTP request body capture tại service layer (Flask) — `body_preview` field với sensitive field masking (`password`, `token` → `[redacted]`).
 - [x] Fix ES field type conflict: `app.ts` thống nhất unix epoch integer giữa HAProxy và service logs.
 - [x] LLM analyzer two-pass enrichment: merge `body_preview` từ service logs vào gateway events theo `(session_id, method, path)`.
+- [x] Control-plane decision/state events gửi sang Filebeat UDP để Elasticsearch có đủ dữ liệu export replay buffer.
+- [x] Fix ES mapping conflict cho replay logs:
+  - `app.ts` thống nhất unix epoch integer.
+  - `app.state` ghi dạng list chuỗi số trong ES để tránh `long|float` dynamic mapping conflict; replay exporter convert lại về float.
 
 ### LLM analyzer — Groq API integration
 - [x] Thay `call_llm()` stub bằng Groq API call thật (model: `llama-3.3-70b-versatile`).
@@ -109,6 +115,9 @@ make test-routes
 make test-honeypots
 make test-rl-split-ip
 make test-adaptive-web
+make test-adaptive-attacks
+make export-replay-buffer
+make train-rl-replay
 make validate
 ```
 
@@ -124,6 +133,8 @@ Kết quả:
 - [x] `make test-rl-split-ip` PASS (Client A -> `ssti-honeypot`, Client B -> `real-backend`).
 - [x] `make test-adaptive-web` PASS (`log -> analyzer -> controller -> HAProxy session route -> SQLI honeypot`).
 - [x] `make test-adaptive-attacks` PASS (`SQLi`, `CMDi`, `SSTI`, `SSRF` route đúng endpoint-scoped honeypot; không route sentinel `sid="-"`).
+- [x] `make export-replay-buffer` PASS (10 transitions từ runtime logs hiện tại, 5 sessions exported).
+- [x] `make train-rl-replay` PASS trong Docker `rl_agent`, xuất `rl_agent_linear.json` và metrics.
 - [x] `make validate` PASS (syntax check, routing controller health, honeypot tests, core route smoke).
 - [x] Route maps sạch sau E2E (`session_routes={}`, `ip_routes={}`).
 
@@ -136,7 +147,8 @@ Kết quả:
 ## 5) Lưu ý vận hành
 
 - Lệnh make/compose nên chạy trong `adaptive_honeypot_system/`.
-- `make train-rl` cần dataset local (`control_plane/rl_agent/data/fake_transitions.jsonl`).
+- `make train-rl` và `make train-rl-replay` chạy trong Docker `rl_agent` container, nên host không cần cài Torch.
+- `make train-rl` cần dataset local (`control_plane/rl_agent/data/fake_transitions.jsonl`) vì thư mục data được mount vào container.
 - Nếu data rỗng, dùng `make train-rl-fresh` để tự sinh data rồi train.
 
 ## 6) Việc còn lại
@@ -144,6 +156,7 @@ Kết quả:
 - [x] ~~Thay dummy `llm_analyzer` bằng LLM analyzer gọi provider thật.~~
 - [x] Hoàn thiện fallback rule-based để thiếu API key/provider lỗi vẫn chạy được demo adaptive rõ ràng.
 - [x] Migrate state v1 24D sang `rl_state_v2_16`.
+- [x] Xây dựng decision/state logging + reward builder + replay buffer exporter.
 - [ ] Thay dummy/Torch stub policy bằng policy RL train/evaluate đầy đủ trên dataset thật.
 - [ ] Hoàn thiện benchmark (route accuracy, false reroute, engagement).
 - [ ] Hoàn thiện L4 SSH/FTP/SMTP Drop-and-Catch nếu còn trong scope demo.

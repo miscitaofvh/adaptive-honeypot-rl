@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
+import hashlib
 import math
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -26,7 +29,7 @@ CONTROL_PLANE_DIR = Path(__file__).resolve().parents[1]
 if str(CONTROL_PLANE_DIR) not in sys.path:
     sys.path.insert(0, str(CONTROL_PLANE_DIR))
 
-from state_builder import STATE_DIM, STATE_SCHEMA_VERSION, StateVector  # noqa: E402
+from state_builder import STATE_DIM, STATE_FIELD_NAMES, STATE_SCHEMA_VERSION, StateVector  # noqa: E402
 
 
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +54,52 @@ ANALYZER_STARTED_AT = datetime.now(timezone.utc)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "15"))
+FILEBEAT_HOST = os.getenv("FILEBEAT_HOST", "filebeat")
+FILEBEAT_SERVICE_PORT = int(os.getenv("FILEBEAT_SERVICE_PORT", "5141"))
+CONTROL_PLANE_SYSLOG = os.getenv("CONTROL_PLANE_SYSLOG", "true").strip().lower() in {"1", "true", "yes"}
+
+
+def _event_logger() -> logging.Logger:
+    event_logger = logging.getLogger("llm_analyzer.events")
+    event_logger.setLevel(logging.INFO)
+    if not event_logger.handlers:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter("%(message)s"))
+        event_logger.addHandler(stream_handler)
+        if CONTROL_PLANE_SYSLOG:
+            try:
+                syslog_handler = logging.handlers.SysLogHandler(
+                    address=(FILEBEAT_HOST, FILEBEAT_SERVICE_PORT),
+                    socktype=socket.SOCK_DGRAM,
+                )
+                syslog_handler.setFormatter(logging.Formatter("%(message)s"))
+                event_logger.addHandler(syslog_handler)
+            except Exception as exc:  # pragma: no cover - best-effort observability path
+                logger.warning("failed to attach Filebeat syslog handler: %s", exc)
+    event_logger.propagate = False
+    return event_logger
+
+
+def log_json_event(payload: dict[str, Any]) -> None:
+    _event_logger().info(json.dumps(payload, ensure_ascii=True))
+
+
+def log_float(value: Any) -> str:
+    return f"{float(value):.6f}"
+
+
+def log_float_list(values: list[float]) -> list[str]:
+    return [log_float(value) for value in values]
+
+
+def log_float_map(values: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in values.items():
+        try:
+            result[key] = log_float(value)
+        except (TypeError, ValueError):
+            result[key] = value
+    return result
 
 _groq_client: Optional[Groq] = None
 if GROQ_API_KEY and Groq is not None:
@@ -66,6 +115,21 @@ ATTACK_TO_BACKEND = {
     "cmdi": "cmdi_api",
     "ssti": "ssti_api",
     "ssrf": "ssrf_api",
+}
+ACTION_KEEP_NORMAL = 0
+BACKEND_TO_ACTION = {
+    "normal_api": ACTION_KEEP_NORMAL,
+    "sqli_api": 1,
+    "ssti_api": 2,
+    "cmdi_api": 3,
+    "ssrf_api": 4,
+}
+ACTION_NAMES = {
+    ACTION_KEEP_NORMAL: "KEEP_NORMAL",
+    1: "ROUTE_SQLI",
+    2: "ROUTE_SSTI",
+    3: "ROUTE_CMDI",
+    4: "ROUTE_SSRF",
 }
 
 # Paths that are only reachable via API — frontend/static hits are ignored
@@ -173,6 +237,32 @@ def require_debug_exposure() -> None:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_epoch() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def make_decision_id(session_id: str, window_start: str, window_end: str, state: list[float]) -> str:
+    material = json.dumps(
+        {
+            "session_id": session_id,
+            "window_start": window_start,
+            "window_end": window_end,
+            "state": [round(float(value), 6) for value in state],
+        },
+        sort_keys=True,
+        ensure_ascii=True,
+    )
+    return hashlib.sha1(material.encode("utf-8")).hexdigest()[:16]
+
+
+def action_name_for(action_id: int) -> str:
+    return ACTION_NAMES.get(action_id, f"UNKNOWN_{action_id}")
+
+
+def action_for_backend(backend: Optional[str]) -> int:
+    return BACKEND_TO_ACTION.get(str(backend or "normal_api"), ACTION_KEEP_NORMAL)
 
 
 def remember_seen(event_id: str) -> None:
@@ -856,6 +946,81 @@ def build_state_vector(rule_features: dict[str, float], llm_output: Optional[dic
     return state
 
 
+def log_state_decision(
+    *,
+    decision_id: str,
+    session_id: str,
+    client_ip: str,
+    context: dict[str, Any],
+    rule_features: dict[str, float],
+    state: list[float],
+    llm_output: dict[str, Any],
+    semantic_source: str,
+    reason: str,
+    action_id: int,
+    backend: str,
+    route_applied: bool,
+    controller_response: Optional[dict[str, Any]] = None,
+    controller_error: str = "",
+) -> None:
+    window = context.get("window") or {}
+    target_scores = {
+        "sqli": state[7],
+        "cmdi": state[8],
+        "ssti": state[9],
+        "ssrf": state[10],
+        "credential_attack": state[11],
+        "enumeration": state[12],
+    }
+    log_json_event({
+        "event_schema_version": "1.0",
+        "event_type": "rl_state_decision",
+        "ts": now_epoch(),
+        "service": "llm-analyzer",
+        "decision_id": decision_id,
+        "session_id": session_id,
+        "client_ip": client_ip,
+        "protocol": "http",
+        "state_schema": STATE_SCHEMA_VERSION,
+        "state_dim": STATE_DIM,
+        "state_fields": STATE_FIELD_NAMES,
+        "state": log_float_list(state),
+        "window_start": window.get("start"),
+        "window_end": window.get("end"),
+        "session_age_s": window.get("session_age_s"),
+        "event_count": len(context.get("events") or []),
+        "request_count": window.get("request_count"),
+        "failed_count": window.get("failed_count"),
+        "unique_paths": context.get("unique_paths") or [],
+        "current_backend": window.get("current_backend"),
+        "rule_features": log_float_map({k: v for k, v in rule_features.items() if not k.startswith("_")}),
+        "semantic_source": semantic_source,
+        "attack_category": llm_output.get("attack_category"),
+        "attack_type": _attack_type_from_state(state),
+        "target_scores": target_scores,
+        "llm_confidence": llm_output.get("llm_confidence"),
+        "action_id": int(action_id),
+        "action_name": action_name_for(int(action_id)),
+        "backend": backend,
+        "route_applied": bool(route_applied),
+        "decision_reason": reason,
+        "controller_response": controller_response or {},
+        "controller_error": controller_error,
+    })
+
+
+def _attack_type_from_state(state: list[float]) -> Optional[str]:
+    subtypes = ["sqli", "cmdi", "ssti", "ssrf"]
+    subtype_scores = state[7:11]
+    if not subtype_scores:
+        return None
+    best_idx = max(range(len(subtype_scores)), key=lambda idx: subtype_scores[idx])
+    best_score = subtype_scores[best_idx]
+    if best_score >= ANALYZER_ROUTE_THRESHOLD:
+        return subtypes[best_idx]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main analysis pipeline for one session
 # ---------------------------------------------------------------------------
@@ -880,6 +1045,14 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     llm_output, semantic_source = apply_rule_guardrail(session_id, events, llm_output)
 
     state = build_state_vector(rule_features, llm_output)
+    window = context.get("window") or {}
+    decision_id = make_decision_id(
+        session_id=session_id,
+        window_start=str(window.get("start") or ""),
+        window_end=str(window.get("end") or ""),
+        state=state,
+    )
+    client_ip = events[0].get("client_ip", "")
 
     # Determine target backend from v2 target scores after confidence scaling.
     subtype_scores = state[7:11]
@@ -889,6 +1062,20 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     attack_type = subtypes[best_idx] if best_score >= ANALYZER_ROUTE_THRESHOLD else None
 
     if not attack_type:
+        log_state_decision(
+            decision_id=decision_id,
+            session_id=session_id,
+            client_ip=client_ip,
+            context=context,
+            rule_features=rule_features,
+            state=state,
+            llm_output=llm_output,
+            semantic_source=semantic_source,
+            reason="target_score_too_low",
+            action_id=ACTION_KEEP_NORMAL,
+            backend="normal_api",
+            route_applied=False,
+        )
         return {
             "routed": False,
             "reason": "target_score_too_low",
@@ -898,29 +1085,69 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
         }
 
     backend = ATTACK_TO_BACKEND[attack_type]
-    client_ip = events[0].get("client_ip", "")
 
     if should_skip_cooldown(session_id, backend):
+        action_id = action_for_backend(backend)
+        log_state_decision(
+            decision_id=decision_id,
+            session_id=session_id,
+            client_ip=client_ip,
+            context=context,
+            rule_features=rule_features,
+            state=state,
+            llm_output=llm_output,
+            semantic_source=semantic_source,
+            reason="cooldown",
+            action_id=action_id,
+            backend=backend,
+            route_applied=False,
+        )
         return {"routed": False, "reason": "cooldown", "session_id": session_id, "backend": backend}
 
     payload = {
+        "decision_id": decision_id,
         "state_schema": STATE_SCHEMA_VERSION,
         "protocol": "http",
         "session_id": session_id or None,
         "source_ip": client_ip or None,
+        "window_start": window.get("start"),
+        "window_end": window.get("end"),
         "state": state,
         "apply_route": ANALYZER_APPLY_ROUTE,
     }
-    response = requests.post(f"{ROUTING_CONTROLLER_URL}/decide", json=payload, timeout=5)
-    response.raise_for_status()
-    body = response.json()
-    stats["decisions"] += 1
+    try:
+        response = requests.post(f"{ROUTING_CONTROLLER_URL}/decide", json=payload, timeout=5)
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:
+        log_state_decision(
+            decision_id=decision_id,
+            session_id=session_id,
+            client_ip=client_ip,
+            context=context,
+            rule_features=rule_features,
+            state=state,
+            llm_output=llm_output,
+            semantic_source=semantic_source,
+            reason="controller_error",
+            action_id=action_for_backend(backend),
+            backend=backend,
+            route_applied=False,
+            controller_error=str(exc),
+        )
+        raise
 
-    logger.info(json.dumps({
+    stats["decisions"] += 1
+    action_id = int(body.get("action_id", action_for_backend(backend)))
+    selected_backend = str(body.get("backend") or backend)
+    route_applied = bool(body.get("route_applied", False))
+
+    log_json_event({
         "event_schema_version": "1.0",
         "event_type": "llm_route_decision",
-        "ts": now_iso(),
+        "ts": now_epoch(),
         "service": "llm-analyzer",
+        "decision_id": decision_id,
         "session_id": session_id,
         "state_schema": STATE_SCHEMA_VERSION,
         "semantic_source": semantic_source,
@@ -934,12 +1161,27 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
         },
         "llm_confidence": llm_output.get("llm_confidence"),
         "controller_response": body,
-    }, ensure_ascii=True))
+    })
+    log_state_decision(
+        decision_id=decision_id,
+        session_id=session_id,
+        client_ip=client_ip,
+        context=context,
+        rule_features=rule_features,
+        state=state,
+        llm_output=llm_output,
+        semantic_source=semantic_source,
+        reason="controller_decide",
+        action_id=action_id,
+        backend=selected_backend,
+        route_applied=route_applied,
+        controller_response=body,
+    )
 
     return {
         "routed": True,
         "attack_type": attack_type,
-        "backend": backend,
+        "backend": selected_backend,
         "semantic_source": semantic_source,
         "controller_response": body,
     }

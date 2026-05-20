@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -28,6 +30,7 @@ from agent import (  # noqa: E402
     STATE_DIM,
     STATE_SCHEMA_VERSION,
     LinearQAgent,
+    allowed_action_indices,
     action_backend,
     action_name,
 )
@@ -50,6 +53,9 @@ HEURISTIC_ROUTE_THRESHOLD = float(os.getenv("HEURISTIC_ROUTE_THRESHOLD", "0.45")
 L4_ROUTING_ENABLED = os.getenv("L4_ROUTING_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 SESSION_ROUTES_MAP = Path(os.getenv("SESSION_ROUTES_MAP", "/etc/haproxy/maps/session_routes.map"))
 IP_HONEYPOT_MAP = Path(os.getenv("IP_HONEYPOT_MAP", "/etc/haproxy/maps/ip_honeypot.map"))
+FILEBEAT_HOST = os.getenv("FILEBEAT_HOST", "filebeat")
+FILEBEAT_SERVICE_PORT = int(os.getenv("FILEBEAT_SERVICE_PORT", "5141"))
+CONTROL_PLANE_SYSLOG = os.getenv("CONTROL_PLANE_SYSLOG", "true").strip().lower() in {"1", "true", "yes"}
 
 HTTP_BACKENDS = {
     "normal_api",
@@ -69,12 +75,44 @@ model_lock = threading.Lock()
 agent = LinearQAgent(seed=123)
 
 
+def _event_logger() -> logging.Logger:
+    event_logger = logging.getLogger("routing_controller.events")
+    event_logger.setLevel(logging.INFO)
+    if not event_logger.handlers:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter("%(message)s"))
+        event_logger.addHandler(stream_handler)
+        if CONTROL_PLANE_SYSLOG:
+            try:
+                syslog_handler = logging.handlers.SysLogHandler(
+                    address=(FILEBEAT_HOST, FILEBEAT_SERVICE_PORT),
+                    socktype=socket.SOCK_DGRAM,
+                )
+                syslog_handler.setFormatter(logging.Formatter("%(message)s"))
+                event_logger.addHandler(syslog_handler)
+            except Exception as exc:  # pragma: no cover - best-effort observability path
+                logger.warning("failed to attach Filebeat syslog handler: %s", exc)
+    event_logger.propagate = False
+    return event_logger
+
+
+def log_json_event(payload: dict) -> None:
+    _event_logger().info(json.dumps(payload, ensure_ascii=True))
+
+
+def log_float_list(values: List[float]) -> List[str]:
+    return [f"{float(value):.6f}" for value in values]
+
+
 class DecisionRequest(BaseModel):
+    decision_id: Optional[str] = None
     state_schema: str = Field(default=STATE_SCHEMA_VERSION)
     protocol: str = Field(default="http")
     state: List[float] = Field(min_length=STATE_DIM, max_length=STATE_DIM)
     session_id: Optional[str] = None
     source_ip: Optional[str] = None
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
     apply_route: bool = True
 
     @field_validator("protocol")
@@ -95,6 +133,7 @@ class DecisionRequest(BaseModel):
 
 
 class DecisionResponse(BaseModel):
+    decision_id: Optional[str] = None
     state_schema: str
     protocol: str
     action_id: int
@@ -303,20 +342,26 @@ def log_decision(req: DecisionRequest, action_idx: int, backend: str, applied: b
     payload = {
         "event_schema_version": "1.0",
         "event_type": "route_decision",
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": int(datetime.now(timezone.utc).timestamp()),
         "service": "routing-controller",
+        "decision_id": req.decision_id or "",
         "policy_mode": POLICY_MODE,
         "state_schema": req.state_schema,
+        "state_dim": STATE_DIM,
         "protocol": req.protocol,
         "session_id": req.session_id or "",
         "source_ip": req.source_ip or "",
+        "window_start": req.window_start or "",
+        "window_end": req.window_end or "",
+        "state": log_float_list(req.state),
+        "allowed_actions": allowed_action_indices(req.protocol),
         "action_id": action_idx,
         "action_name": action_name(action_idx),
         "backend": backend,
         "route_applied": applied,
         "route_output": route_output or "",
     }
-    logger.info(json.dumps(payload, ensure_ascii=True))
+    log_json_event(payload)
 
 
 def read_map(path: Path) -> dict[str, str]:
@@ -438,6 +483,7 @@ def decide(req: DecisionRequest) -> DecisionResponse:
     log_decision(req, action_idx, chosen_backend, applied, route_output)
 
     return DecisionResponse(
+        decision_id=req.decision_id,
         state_schema=req.state_schema,
         protocol=req.protocol,
         action_id=action_idx,
