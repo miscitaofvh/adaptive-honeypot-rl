@@ -100,8 +100,8 @@ settled_cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/8] Start normal-first stack with deterministic analyzer fallback..."
-GROQ_API_KEY= TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true SERVICE_BODY_WAIT_SECONDS=8 docker compose up -d --build --force-recreate \
+echo "[1/8] Start normal-first stack with deterministic analyzer fallback and trained RL model..."
+GROQ_API_KEY= TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=model ANALYZER_ENABLED=true SERVICE_BODY_WAIT_SECONDS=8 docker compose up -d --build --force-recreate --remove-orphans \
   elasticsearch \
   backend \
   sqli_pot \

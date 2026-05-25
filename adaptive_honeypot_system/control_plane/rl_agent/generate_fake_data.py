@@ -10,20 +10,17 @@ from typing import Dict, List, Tuple
 from agent import (
     ACTION_KEEP_NORMAL,
     ACTION_ROUTE_CMDI,
-    ACTION_ROUTE_FTP,
-    ACTION_ROUTE_SMTP,
     ACTION_ROUTE_SQLI,
-    ACTION_ROUTE_SSH,
     ACTION_ROUTE_SSRF,
     ACTION_ROUTE_SSTI,
     STATE_DIM,
+    action_backend,
+    action_name,
     allowed_action_indices,
 )
+from state_builder import STATE_FIELD_NAMES, STATE_SCHEMA_VERSION
 
 HTTP_ATTACKS = ["benign", "sqli", "cmdi", "ssti", "ssrf", "malformed"]
-SSH_ATTACKS = ["benign", "bruteforce", "enumeration"]
-FTP_ATTACKS = ["benign", "bruteforce", "enumeration"]
-SMTP_ATTACKS = ["benign", "bruteforce", "enumeration"]
 
 
 def clip01(x: float) -> float:
@@ -42,15 +39,7 @@ def weighted_choice(rng: random.Random, choices: List[Tuple[str, float]]) -> str
 
 
 def choose_protocol(rng: random.Random) -> str:
-    return weighted_choice(
-        rng,
-        [
-            ("http", 0.72),
-            ("ssh", 0.10),
-            ("ftp", 0.10),
-            ("smtp", 0.08),
-        ],
-    )
+    return "http"
 
 
 def choose_attack(rng: random.Random, protocol: str, previous_attack: str | None) -> str:
@@ -69,11 +58,7 @@ def choose_attack(rng: random.Random, protocol: str, previous_attack: str | None
                 ("malformed", 0.05),
             ],
         )
-    if protocol == "ssh":
-        return weighted_choice(rng, [("benign", 0.48), ("bruteforce", 0.36), ("enumeration", 0.16)])
-    if protocol == "ftp":
-        return weighted_choice(rng, [("benign", 0.50), ("bruteforce", 0.28), ("enumeration", 0.22)])
-    return weighted_choice(rng, [("benign", 0.52), ("bruteforce", 0.32), ("enumeration", 0.16)])
+    return "benign"
 
 
 def optimal_action(protocol: str, attack: str) -> int:
@@ -87,13 +72,6 @@ def optimal_action(protocol: str, attack: str) -> int:
         if attack == "ssrf":
             return ACTION_ROUTE_SSRF
         return ACTION_KEEP_NORMAL
-
-    if protocol == "ssh":
-        return ACTION_KEEP_NORMAL if attack == "benign" else ACTION_ROUTE_SSH
-    if protocol == "ftp":
-        return ACTION_KEEP_NORMAL if attack == "benign" else ACTION_ROUTE_FTP
-    if protocol == "smtp":
-        return ACTION_KEEP_NORMAL if attack == "benign" else ACTION_ROUTE_SMTP
 
     return ACTION_KEEP_NORMAL
 
@@ -142,7 +120,7 @@ def reward_for_action(action: int, optimal: int, attack: str, current_route: int
 
 def target_scores(protocol: str, attack: str) -> List[float]:
     """Return v2 target scores:
-    [sqli, cmdi, ssti, ssrf, credential_attack, enumeration].
+    [sqli, cmdi, ssti, ssrf, credential_attack_reserved, enumeration_reserved].
     """
     scores = [0.0 for _ in range(6)]
     if protocol == "http":
@@ -152,10 +130,6 @@ def target_scores(protocol: str, attack: str) -> List[float]:
             for idx in range(4):
                 if idx != mapping[attack]:
                     scores[idx] = 0.02
-    elif attack == "bruteforce":
-        scores[4] = 0.92
-    elif attack == "enumeration":
-        scores[5] = 0.90
     return scores
 
 
@@ -310,8 +284,12 @@ def generate_dataset(
                     "step": step,
                     "protocol": protocol,
                     "attack_type": current_attack,
+                    "state_schema": STATE_SCHEMA_VERSION,
+                    "state_fields": STATE_FIELD_NAMES,
                     "state": state,
                     "action": behavior_action,
+                    "action_name": action_name(behavior_action),
+                    "backend": action_backend(behavior_action),
                     "reward": reward,
                     "next_state": next_state,
                     "done": done,
@@ -346,9 +324,9 @@ def parse_args() -> argparse.Namespace:
         default=Path(__file__).resolve().parent / "data" / "fake_transitions.jsonl",
         help="Output JSONL dataset path.",
     )
-    parser.add_argument("--sessions", type=int, default=800, help="Number of synthetic sessions.")
-    parser.add_argument("--min-steps", type=int, default=6, help="Minimum steps per session.")
-    parser.add_argument("--max-steps", type=int, default=14, help="Maximum steps per session.")
+    parser.add_argument("--sessions", type=int, default=10000, help="Number of synthetic sessions.")
+    parser.add_argument("--min-steps", type=int, default=8, help="Minimum steps per session.")
+    parser.add_argument("--max-steps", type=int, default=12, help="Maximum steps per session.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     return parser.parse_args()
 

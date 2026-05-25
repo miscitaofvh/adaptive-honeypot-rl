@@ -57,6 +57,23 @@ GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "15"))
 FILEBEAT_HOST = os.getenv("FILEBEAT_HOST", "filebeat")
 FILEBEAT_SERVICE_PORT = int(os.getenv("FILEBEAT_SERVICE_PORT", "5141"))
 CONTROL_PLANE_SYSLOG = os.getenv("CONTROL_PLANE_SYSLOG", "true").strip().lower() in {"1", "true", "yes"}
+HOST_DEBUG_LOG_ENABLED = os.getenv("HOST_DEBUG_LOG_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+HOST_LLM_FIELDS_LOG_PATH = os.getenv(
+    "HOST_LLM_FIELDS_LOG_PATH",
+    "/var/log/adaptive-honeypot/llm_fields.jsonl",
+)
+
+
+def write_host_debug_log(path: str, payload: dict[str, Any]) -> None:
+    if not HOST_DEBUG_LOG_ENABLED or not path:
+        return
+    try:
+        log_path = Path(path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 
 def _event_logger() -> logging.Logger:
@@ -81,6 +98,9 @@ def _event_logger() -> logging.Logger:
 
 
 def log_json_event(payload: dict[str, Any]) -> None:
+    record = dict(payload)
+    record.setdefault("host_debug_source", "llm_analyzer")
+    write_host_debug_log(HOST_LLM_FIELDS_LOG_PATH, record)
     _event_logger().info(json.dumps(payload, ensure_ascii=True))
 
 
@@ -239,8 +259,23 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def now_epoch() -> int:
-    return int(datetime.now(timezone.utc).timestamp())
+def now_epoch() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+def parse_iso_epoch(value: Any) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        text = str(value)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except ValueError:
+        return None
 
 
 def make_decision_id(session_id: str, window_start: str, window_end: str, state: list[float]) -> str:
@@ -962,8 +997,17 @@ def log_state_decision(
     route_applied: bool,
     controller_response: Optional[dict[str, Any]] = None,
     controller_error: str = "",
+    analysis_duration_ms: Optional[float] = None,
+    controller_roundtrip_ms: Optional[float] = None,
 ) -> None:
     window = context.get("window") or {}
+    decision_time = time.time()
+    window_end_epoch = parse_iso_epoch(window.get("end"))
+    event_to_decision_latency_ms = (
+        round((decision_time - window_end_epoch) * 1000, 2)
+        if window_end_epoch is not None
+        else None
+    )
     target_scores = {
         "sqli": state[7],
         "cmdi": state[8],
@@ -972,6 +1016,9 @@ def log_state_decision(
         "credential_attack": state[11],
         "enumeration": state[12],
     }
+    attack_type = _attack_type_from_state(state)
+    expected_backend = ATTACK_TO_BACKEND.get(attack_type or "", "normal_api")
+    route_correct_by_semantic_label = bool(expected_backend == backend)
     log_json_event({
         "event_schema_version": "1.0",
         "event_type": "rl_state_decision",
@@ -1002,6 +1049,14 @@ def log_state_decision(
         "action_id": int(action_id),
         "action_name": action_name_for(int(action_id)),
         "backend": backend,
+        "metric_source": "llm_analyzer_fields",
+        "evaluation_only": True,
+        "expected_backend_by_semantic_label": expected_backend,
+        "route_correct_by_semantic_label": route_correct_by_semantic_label,
+        "is_attack_window": bool(attack_type),
+        "analysis_duration_ms": analysis_duration_ms,
+        "controller_roundtrip_ms": controller_roundtrip_ms,
+        "event_to_decision_latency_ms": event_to_decision_latency_ms,
         "route_applied": bool(route_applied),
         "decision_reason": reason,
         "controller_response": controller_response or {},
@@ -1036,6 +1091,11 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     """
     if not events:
         return {"routed": False, "reason": "no events"}
+
+    analysis_started_at = time.monotonic()
+
+    def elapsed_ms() -> float:
+        return round((time.monotonic() - analysis_started_at) * 1000, 2)
 
     context = build_session_context(session_id, events)
     rule_features = compute_rule_features(session_id, events)
@@ -1075,6 +1135,7 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
             action_id=ACTION_KEEP_NORMAL,
             backend="normal_api",
             route_applied=False,
+            analysis_duration_ms=elapsed_ms(),
         )
         return {
             "routed": False,
@@ -1101,6 +1162,7 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
             action_id=action_id,
             backend=backend,
             route_applied=False,
+            analysis_duration_ms=elapsed_ms(),
         )
         return {"routed": False, "reason": "cooldown", "session_id": session_id, "backend": backend}
 
@@ -1115,11 +1177,15 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
         "state": state,
         "apply_route": ANALYZER_APPLY_ROUTE,
     }
+    controller_started_at = time.monotonic()
+    controller_roundtrip_ms: Optional[float] = None
     try:
         response = requests.post(f"{ROUTING_CONTROLLER_URL}/decide", json=payload, timeout=5)
+        controller_roundtrip_ms = round((time.monotonic() - controller_started_at) * 1000, 2)
         response.raise_for_status()
         body = response.json()
     except Exception as exc:
+        controller_roundtrip_ms = round((time.monotonic() - controller_started_at) * 1000, 2)
         log_state_decision(
             decision_id=decision_id,
             session_id=session_id,
@@ -1134,6 +1200,8 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
             backend=backend,
             route_applied=False,
             controller_error=str(exc),
+            analysis_duration_ms=elapsed_ms(),
+            controller_roundtrip_ms=controller_roundtrip_ms,
         )
         raise
 
@@ -1141,6 +1209,7 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     action_id = int(body.get("action_id", action_for_backend(backend)))
     selected_backend = str(body.get("backend") or backend)
     route_applied = bool(body.get("route_applied", False))
+    route_correct_by_semantic_label = bool(selected_backend == backend)
 
     log_json_event({
         "event_schema_version": "1.0",
@@ -1153,6 +1222,12 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
         "semantic_source": semantic_source,
         "attack_type": attack_type,
         "target_backend": backend,
+        "selected_backend": selected_backend,
+        "metric_source": "llm_analyzer_fields",
+        "evaluation_only": True,
+        "route_correct_by_semantic_label": route_correct_by_semantic_label,
+        "analysis_duration_ms": elapsed_ms(),
+        "controller_roundtrip_ms": controller_roundtrip_ms,
         "target_scores": {
             "sqli": state[7],
             "cmdi": state[8],
@@ -1176,6 +1251,8 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
         backend=selected_backend,
         route_applied=route_applied,
         controller_response=body,
+        analysis_duration_ms=elapsed_ms(),
+        controller_roundtrip_ms=controller_roundtrip_ms,
     )
 
     return {

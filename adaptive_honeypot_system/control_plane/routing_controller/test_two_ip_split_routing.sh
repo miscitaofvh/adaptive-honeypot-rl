@@ -54,11 +54,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/6] Create dummy model (always SSTI for HTTP)..."
-python control_plane/rl_agent/create_dummy_ssti_model.py --output "$MODEL_PATH"
+echo "[1/6] Verify trained model artifact exists..."
+if [[ ! -f "$MODEL_PATH" ]]; then
+  echo "Missing trained model artifact: $MODEL_PATH"
+  echo "Run: make train-rl-fresh PYTHON=../.venv/bin/python"
+  exit 1
+fi
 
 echo "[2/6] Start gateway + routing_controller in NORMAL mode (control plane async, service-first)..."
-TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=model docker compose up -d --build gateway routing_controller >/dev/null
+TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=model docker compose up -d --build --remove-orphans gateway routing_controller >/dev/null
 wait_for_controller
 
 echo "[3/6] Reload model in routing controller..."
@@ -87,11 +91,11 @@ fi
 echo "Client A IP: $IP_A"
 echo "Client B IP: $IP_B"
 
-echo "[5/6] Route only client A via /decide (dummy model => ssti_api)..."
+echo "[5/6] Route only client A via /decide (trained model, SSTI-weighted state)..."
 curl -fsS -X DELETE "$CONTROLLER_URL/route/ip/$IP_A" >/dev/null 2>&1 || true
 
 DECIDE_PAYLOAD=$(cat <<EOF
-{"state_schema":"rl_state_v2_16","protocol":"http","source_ip":"$IP_A","apply_route":true,"state":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"state_schema":"web_state","protocol":"http","source_ip":"$IP_A","apply_route":true,"state":[0.2,0.4,0.1,0.8,0.6,0,0.2,0.05,0.05,0.95,0.05,0,0,0.2,0.6,0.8]}
 EOF
 )
 
@@ -99,7 +103,7 @@ DECIDE_RESPONSE="$(curl -fsS -X POST "$CONTROLLER_URL/decide" -H 'Content-Type: 
 echo "Decision: $DECIDE_RESPONSE"
 
 if ! echo "$DECIDE_RESPONSE" | grep -q '"backend":"ssti_api"'; then
-  echo "Expected backend ssti_api from dummy model, got: $DECIDE_RESPONSE"
+  echo "Expected backend ssti_api from trained model for SSTI-weighted state, got: $DECIDE_RESPONSE"
   exit 1
 fi
 

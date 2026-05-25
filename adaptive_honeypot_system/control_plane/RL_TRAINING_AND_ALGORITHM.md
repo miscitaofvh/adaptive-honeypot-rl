@@ -1,48 +1,25 @@
-# Hướng dẫn RL Training và Thuật toán
+# RL Training And Algorithm
 
-Tài liệu này mô tả:
-- Cách chạy pipeline train RL offline.
-- Thuật toán RL hiện đang dùng.
-- Cách test routing controller trong Docker Compose.
+## Scope
 
-## 0) Nguyên tắc control plane bất đồng bộ
+RL hiện tại phục vụ Web-only adaptive routing. Không train hoặc route cho SSH/FTP/SMTP trong đồ án hiện tại.
 
-Stack tuân theo kiến trúc đề xuất:
-- Data plane (`gateway` + các service) phục vụ request trực tiếp.
-- Control plane (`llm_analyzer`, `routing_controller`, RL model/runtime policy) cập nhật route map bất đồng bộ.
+Runtime controller không import torch. Torch chỉ dùng khi train local, sau đó export model thành JSON tại:
 
-Không có phụ thuộc đồng bộ từ request path vào inference của control plane,
-nên traffic web không bị chặn khi control plane chậm hoặc restart.
+```text
+control_plane/rl_agent/artifacts/rl_agent_linear.json
+```
 
-## 1) Phạm vi component
+## State
 
-Phạm vi control plane hiện tại:
-- `control_plane/rl_agent/generate_fake_data.py`
-- `control_plane/rl_agent/train_offline.py`
-- `control_plane/rl_agent/agent.py`
-- `control_plane/rl_agent/service.py` (Torch RL service rieng cho debug/export/one-epoch proxy train)
-- `control_plane/routing_controller/main.py`
-- `control_plane/llm_analyzer/analyzer.py` (poll Elasticsearch, gọi Groq khi có key, dựng state runtime hiện tại và gọi `/decide`)
+Schema:
 
-`routing_controller` đã được wiring trong `docker-compose.yml`.
+```text
+web_state
+STATE_DIM = 16
+```
 
-## 2) Chính sách phụ thuộc (quan trọng)
-
-- PyTorch chỉ dùng để train offline trên máy local và trong service riêng `rl_agent`.
-- Không cài `torch` trong `routing_controller`, real service, honeypots, gateway hoặc analyzer.
-- Runtime controller chỉ đọc JSON weights (`LinearQAgent`) và không phụ thuộc torch.
-- `rl_agent` container có Torch để demo/debug/export model artifact, nhưng không nằm trên request path.
-- Web MVP có thể chạy `RL_POLICY_MODE=heuristic` để dùng dummy subtype-based policy mà không cần model artifact.
-- Yêu cầu local để train: `control_plane/rl_agent/requirements-local.txt`.
-
-## 3) Thiết kế state và action
-
-### State
-- Runtime code hiện tại dùng `rl_state_v2_16` (`STATE_DIM = 16`) trong `agent.py`, `routing_controller`, analyzer và generator.
-- Schema này giảm từ v1 24D xuống 16 chiều, thực tiễn hơn cho Web MVP nhưng vẫn mở rộng được SSH/FTP/SMTP.
-- `protocol` không nằm trong tensor v2. Nó là metadata bắt buộc của `/decide`, dùng cho action masking và normalizer profile theo giao thức.
-
-Schema target v2:
+Field order:
 
 ```text
 0  session_age_norm
@@ -56,398 +33,163 @@ Schema target v2:
 8  target_cmdi_score
 9  target_ssti_score
 10 target_ssrf_score
-11 target_credential_attack_score
-12 target_enumeration_score
+11 target_credential_attack_score   # semantic side signal, no dedicated Web action
+12 target_enumeration_score         # semantic side signal, no dedicated Web action
 13 evasion_score
 14 attack_progression_stage
 15 intent_stability_score
 ```
 
-Các trường bị bỏ khỏi v1 24D:
-- `protocol_onehot`: chuyển thành metadata.
-- `attack_category_onehot`: thay bằng target-specific scores.
-- `attack_vector_shift`: merge vào `intent_stability_score`.
-- `memory_decay_weight`: bỏ cho tới khi có decay thật.
-- `llm_confidence`: dùng để scale các field LLM trước khi build tensor, log riêng để debug.
+## Action Space
 
-### Action space
-Định nghĩa trong `agent.py`:
-- `0`: `KEEP_NORMAL`
-- `1`: `ROUTE_SQLI`
-- `2`: `ROUTE_SSTI`
-- `3`: `ROUTE_CMDI`
-- `4`: `ROUTE_SSRF`
-- `5`: `ROUTE_SSH`
-- `6`: `ROUTE_FTP`
-- `7`: `ROUTE_SMTP`
-
-### Protocol-based action masking
-Chỉ cho phép action hợp lệ theo protocol:
-- HTTP: keep + SQLI/SSTI/CMDI/SSRF
-- SSH: keep + SSH honeypot
-- FTP: keep + FTP honeypot
-- SMTP: keep + SMTP honeypot
-
-Mask được enforce bởi `allowed_action_indices()` khi inference và khi tính training target.
-
-## 4) Thuật toán RL hiện tại
-
-Implementation hiện tại dùng **Discrete Conservative Q-Learning (CQL)** cho offline RL với action space rời rạc:
-
-- Mô hình: `Q(s, a) = w_a^T s + b_a`
-- Kiến trúc runtime hiện tại: `nn.Linear(16, 8)` / JSON linear weights 16D.
-- Tối ưu: `AdamW` + weight decay (`l2`) + gradient clipping.
-- Loss chính: Bellman TD loss `MSE(Q(s,a), target)`.
-- Loss bảo thủ CQL: `logsumexp(Q(s, a_hop_le)) - Q(s, a_dataset)`.
-- Auxiliary behavior loss: cross entropy trên action trong dataset/replay buffer.
-- Tổng loss: `TD loss + cql_alpha * CQL loss + behavior_cloning_weight * BC loss`.
-- Init mặc định: `--init-policy web_prior`, seed weight cho HTTP subtype scores 7-10 trước khi fine-tune. Điều này làm smoke-train vài epoch vẫn route đúng SQLi/CMDi/SSTI/SSRF theo schema, nhưng vẫn cho phép train from scratch bằng `--init-policy random`.
-
-Target cho từng transition `(s, a, r, s', done)`:
-- Nếu `done`: `y = r`
-- Nếu chưa done:
-  - `y = r + gamma * max_{a' hop le theo protocol(s')} Q(s', a')`
-
-CQL được chọn thay cho plain Q-learning vì dữ liệu của hệ thống là offline replay buffer từ log, không có môi trường động để agent tự explore. CQL giảm xu hướng overestimate các action chưa/ít xuất hiện trong dataset, phù hợp với bài toán route attacker sang honeypot khi action sai có thể làm giảm engagement.
-
-Script vẫn giữ baseline Q-learning cũ để so sánh:
-
-```bash
-python control_plane/rl_agent/train_offline.py \
-  --algorithm q_learning \
-  --dataset control_plane/rl_agent/data/replay_buffer.jsonl
+```text
+0 KEEP_NORMAL -> normal_api
+1 ROUTE_SQLI  -> sqli_api
+2 ROUTE_SSTI  -> ssti_api
+3 ROUTE_CMDI  -> cmdi_api
+4 ROUTE_SSRF  -> ssrf_api
 ```
 
-Sau khi train, model được export về JSON (`weights`, `bias`) để runtime controller sử dụng.
+Model artifact phải match đúng action list này. Nếu artifact cũ có action list khác, routing controller sẽ không load artifact đó và fallback sang untrained agent.
 
-Torch RL service hiện tại dùng cùng kiến trúc `nn.Linear(16, 8)`. Mặc định service khởi tạo `web_policy` deterministic theo subtype score để giữ demo ổn định. Endpoint debug `/train/one-epoch` chỉ chạy một proxy epoch nhỏ trên vài sample cố định; đây không phải full train và không đại diện chất lượng policy thật.
+## Vì Sao Dùng CQL
 
-## 5) Setup môi trường train local
+Đồ án không xây dynamic environment để agent thử action online. Dữ liệu train đến từ synthetic transitions hoặc replay buffer đã ghi lại. Đây là bài toán offline RL.
 
-Từ root repo:
+CQL phù hợp vì:
 
-```bash
-cd adaptive_honeypot_system/control_plane/rl_agent
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-local.txt
+- Học từ dataset tĩnh `(state, action, reward, next_state, done)`.
+- Có conservative penalty để giảm Q-value quá cao ở action ít hoặc chưa quan sát.
+- Hạn chế việc model chọn action lạ chỉ vì extrapolation trong dữ liệu ít.
+- Phù hợp discrete action space nhỏ của Web honeypot routing.
+
+Baseline `q_learning` vẫn giữ để so sánh, nhưng mặc định Makefile dùng:
+
+```text
+RL_ALGORITHM=cql
 ```
 
-Lưu ý: bước này chỉ dành cho máy local train offline, không dùng trong Docker runtime.
+## Dataset Format
 
-## 6) Sinh dữ liệu offline
+Mỗi dòng JSONL:
 
-Từ `adaptive_honeypot_system/`:
+```json
+{
+  "session_id": "session_00001",
+  "step": 0,
+  "protocol": "http",
+  "attack_type": "sqli",
+  "state_schema": "web_state",
+  "state_fields": ["..."],
+  "state": [0.0, 0.2, 0.1, 0.8, 1.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.5, 0.8],
+  "action": 1,
+  "action_name": "ROUTE_SQLI",
+  "backend": "sqli_api",
+  "reward": 1.8,
+  "next_state": [0.1, 0.3, 0.1, 0.8, 1.0, 1.0, 0.3, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.6, 0.8],
+  "done": false,
+  "optimal_action": 1
+}
+```
+
+## Data Sources
+
+1. Synthetic Web-only data:
 
 ```bash
 python control_plane/rl_agent/generate_fake_data.py \
-  --sessions 800 \
-  --min-steps 6 \
-  --max-steps 14 \
+  --sessions 10000 \
+  --min-steps 8 \
+  --max-steps 12 \
   --output control_plane/rl_agent/data/fake_transitions.jsonl
 ```
 
-Hoặc dùng Makefile:
-
-```bash
-make gen-fake-data
-```
-
-## 6.1) Export replay buffer từ runtime logs
-
-Sau khi chạy demo/adaptive flow, có thể xuất transition thật hơn từ Elasticsearch:
-
-```bash
-make export-replay-buffer
-```
-
-Target này gọi:
+2. Replay buffer from runtime logs:
 
 ```bash
 python control_plane/replay_buffer/export_replay_buffer.py \
   --output control_plane/rl_agent/data/replay_buffer.jsonl
 ```
 
-Replay exporter đọc các event:
-- `rl_state_decision` từ `llm_analyzer`: `state_t`, `decision_id`, window, semantic scores, action/backend.
-- `route_decision` từ `routing_controller`: action/backend thực tế, `allowed_actions`, route applied.
-- `gateway_request`, `request`, `honeypot_interaction`: outcome sau decision để tính reward engagement.
-
-Transition output có format:
-
-```json
-{
-  "session_id": "sid_demo",
-  "decision_id": "abc123",
-  "step": 0,
-  "protocol": "http",
-  "state_schema": "rl_state_v2_16",
-  "state": [0.0],
-  "action": 1,
-  "reward": 1.25,
-  "next_state": [0.1],
-  "done": false,
-  "optimal_action": 1
-}
-```
-
-Reward builder hiện là heuristic từ log thật:
-- Thưởng route đúng honeypot theo target score.
-- Thưởng honeypot engagement: request tiếp tục vào đúng pot, dwell time, `engagement_depth_norm` tăng, `attack_progression_stage` tăng.
-- Phạt false positive benign -> honeypot.
-- Phạt giữ normal khi evidence attack mạnh.
-- Phạt route sai honeypot hoặc không có follow-up sau khi route.
-
-Train từ replay buffer:
+3. Replay buffer generated by active Web traffic:
 
 ```bash
-make train-rl-replay
+python control_plane/replay_buffer/generate_web_replay_buffer.py \
+  --sessions 48 \
+  --output control_plane/rl_agent/data/replay_buffer.jsonl
 ```
 
-Lưu ý: reward này là bản thực dụng cho dataset offline ban đầu, chưa phải hàm reward cuối cùng của khóa luận. Khi benchmark engagement rõ hơn, nên chỉnh reward weights và thêm contract-mismatch metric.
+## Train Commands
 
-Output mong đợi:
-- File JSONL, mỗi dòng 1 transition.
-- Các trường: `state`, `action`, `reward`, `next_state`, `done`, `protocol`, `optimal_action`.
+Use local venv, not Docker:
 
-## 7) Train offline RL
+```bash
+cd adaptive_honeypot_system
+make gen-fake-data PYTHON=../.venv/bin/python
+make train-rl PYTHON=../.venv/bin/python
+```
 
-Từ `adaptive_honeypot_system/`:
+Short smoke-train:
+
+```bash
+make gen-fake-data PYTHON=../.venv/bin/python RL_SYNTHETIC_SESSIONS=200 RL_SYNTHETIC_MIN_STEPS=3 RL_SYNTHETIC_MAX_STEPS=5
+make train-rl PYTHON=../.venv/bin/python RL_EPOCHS=5 RL_LOG_EVERY=1
+```
+
+Train from replay buffer:
+
+```bash
+make train-rl-replay PYTHON=../.venv/bin/python
+```
+
+Direct command:
 
 ```bash
 python control_plane/rl_agent/train_offline.py \
   --dataset control_plane/rl_agent/data/fake_transitions.jsonl \
   --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
   --algorithm cql \
+  --epochs 40 \
+  --batch-size 256 \
+  --learning-rate 0.003 \
   --cql-alpha 0.50 \
   --cql-temperature 1.0 \
   --behavior-cloning-weight 0.50 \
   --init-policy web_prior \
-  --epochs 40 \
+  --target-update-period 1 \
+  --device cpu \
   --log-every 5
 ```
 
-Smoke-train local vài epoch bằng venv root repo:
+## Runtime Load
+
+After training:
 
 ```bash
-cd adaptive_honeypot_system
-source ../.venv/bin/activate
-python control_plane/rl_agent/train_offline.py \
-  --dataset control_plane/rl_agent/data/fake_transitions_tiny.jsonl \
-  --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
-  --algorithm cql \
-  --epochs 5 \
-  --learning-rate 0.005 \
-  --cql-alpha 0.20 \
-  --behavior-cloning-weight 1.00 \
-  --init-policy web_prior \
-  --log-every 1
+docker compose -f docker-compose.yml up -d --force-recreate routing_controller llm_analyzer
+curl -s -X POST http://localhost:8001/model/reload | python -m json.tool
 ```
 
-Hoặc dùng Makefile:
+Health should show:
+
+```text
+policy_mode = model
+model_exists = true
+state_dim = 16
+implemented_backends = cmdi_api, normal_api, sqli_api, ssrf_api, ssti_api
+```
+
+## Metric/Evaluation Link
+
+Training metrics from `train_offline.py` are model metrics: accuracy against `optimal_action`, proxy reward, loss.
+
+Proposal metrics are evaluated separately from runtime logs:
 
 ```bash
-make train-rl
+make evaluate-metrics PYTHON=../.venv/bin/python
 ```
 
-Makefile mặc định dùng CQL. Có thể override để so sánh baseline:
+This separation is intentional:
 
-```bash
-make train-rl-replay RL_ALGORITHM=cql CQL_ALPHA=0.50 CQL_TEMPERATURE=1.0
-make train-rl-replay RL_ALGORITHM=q_learning
-```
-
-Sinh data + train trong 1 lệnh:
-
-```bash
-make train-rl-fresh
-```
-
-Tạo dummy model để test split-route (HTTP luôn vào SSTI):
-
-```bash
-make make-dummy-model
-```
-
-Tạo dummy web policy model theo subtype `[sqli, cmdi, ssti, ssrf]`:
-
-```bash
-make make-dummy-web-model
-```
-
-Export artifact từ Torch RL service:
-
-```bash
-make rl-agent-export
-```
-
-Chạy một proxy epoch rất nhỏ rồi export artifact:
-
-```bash
-make rl-agent-one-epoch
-```
-
-Artifact mong đợi:
-- `control_plane/rl_agent/artifacts/rl_agent_linear.json`
-- `control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json`
-
-Lưu ý: Docker Compose mặc định dùng `RL_POLICY_MODE=heuristic` để flow demo Web chạy ổn định ngay cả khi chưa có model thật. Khi muốn test artifact JSON, đặt `RL_POLICY_MODE=model`.
-
-## 8) Validate nhanh sau train
-
-### Kiểm tra syntax
-
-```bash
-python -m py_compile \
-  control_plane/rl_agent/agent.py \
-  control_plane/rl_agent/generate_fake_data.py \
-  control_plane/rl_agent/train_offline.py \
-  control_plane/rl_agent/service.py \
-  control_plane/routing_controller/main.py
-```
-
-### Kiểm tra chất lượng cơ bản
-Theo dõi log train và metrics:
-- `train_acc`
-- `val_acc`
-- `val_proxy_reward`
-- `td_mse`
-- `cql`
-
-Mức tối thiểu:
-- Không có runtime exception.
-- Có file metrics.
-- Validation accuracy ổn định, tốt hơn mốc random.
-
-## 9) Chạy và test routing controller trong stack
-
-### Start stack
-
-```bash
-cd adaptive_honeypot_system
-docker compose up -d --build
-```
-
-Endpoint routing controller:
-- `http://localhost:8001`
-
-### Health check
-
-```bash
-curl -s http://localhost:8001/health | jq .
-```
-
-### Kiểm tra Torch chỉ có trong `rl_agent`
-
-```bash
-docker compose exec routing_controller python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
-docker compose exec backend python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
-docker compose exec cmdi_pot python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
-docker compose exec rl_agent python -c "import importlib.util; print(importlib.util.find_spec('torch') is not None)"
-```
-
-Kết quả mong đợi: `routing_controller`, `backend`, `cmdi_pot` đều `False`; riêng `rl_agent` là `True`.
-
-### Test Torch RL service
-
-```bash
-curl -s http://localhost:8003/health | jq .
-
-curl -s -X POST http://localhost:8003/predict \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "state_schema": "rl_state_v2_16",
-    "protocol": "http",
-    "state": [0,0,0,0,0,0,0,0.9,0.05,0.05,0.05,0,0,0.2,0.4,0.8]
-  }' | jq .
-
-curl -s -X POST http://localhost:8003/export | jq .
-curl -s -X POST http://localhost:8001/model/reload | jq .
-```
-
-### Reload model sau khi train
-
-```bash
-curl -s -X POST http://localhost:8001/model/reload | jq .
-```
-
-### Route helper cho test tích hợp
-
-Set route theo session:
-
-```bash
-curl -s -X POST "http://localhost:8001/route/session/sid_demo_001?backend=ssti_api" | jq .
-```
-
-Set route theo source IP:
-
-```bash
-curl -s -X POST "http://localhost:8001/route/ip/172.22.0.99?backend=ssti_api" | jq .
-```
-
-### Test quyết định route HTTP
-
-```bash
-curl -s -X POST http://localhost:8001/decide \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "state_schema": "rl_state_v2_16",
-    "protocol": "http",
-    "session_id": "sid_demo_001",
-    "apply_route": true,
-    "state": [0.2,0.8,0.7,0.6,0.4,0,0,0.9,0.05,0.03,0.02,0,0,0.7,0.5,0.9]
-  }' | jq .
-```
-
-Mong đợi:
-- Controller trả về `action_name` và `backend`.
-- Nếu `apply_route=true`, map sẽ được cập nhật qua `routing_update.sh`.
-
-### Xóa route test thủ công
-
-```bash
-curl -s -X DELETE http://localhost:8001/route/session/sid_demo_001 | jq .
-```
-
-### End-to-end split test (2 IP)
-
-```bash
-make test-rl-split-ip
-```
-
-Script sẽ:
-- Ép gateway về `TEST_HONEYPOT=false` (normal-first).
-- Tạo dummy model và reload.
-- Tạo 2 container client tạm (IP khác nhau).
-- Chỉ apply route cho client A qua `POST /decide` với `source_ip`.
-- Kiểm tra route theo endpoint: preview của A => `ssti-honeypot`; health/ping của A và traffic của B vẫn về `real-backend`.
-
-### End-to-end adaptive web test
-
-```bash
-make test-adaptive-web
-make test-adaptive-attacks
-```
-
-Script sẽ:
-- Ép gateway về normal-first mode.
-- Chạy analyzer và routing controller ở `RL_POLICY_MODE=heuristic`.
-- Gửi SQLi-like payload vào real backend search endpoint.
-- Đợi analyzer poll Elasticsearch, dựng state runtime hiện tại và gọi `/decide`.
-- Xác nhận request tiếp theo cùng `sid` được route sang SQLi honeypot.
-- Test mở rộng xác nhận SQLi/CMDi/SSTI/SSRF đều route đúng endpoint-scoped honeypot và không route sentinel `sid="-"`.
-
-## 10) Giới hạn hiện tại
-
-- `llm_analyzer` đã gọi Groq khi có key, có rule fallback/guardrail khi provider lỗi hoặc LLM bỏ sót payload rõ ràng; phần còn lại là provider abstraction, retry/backoff, và memory decay.
-- Runtime state đã là `rl_state_v2_16`.
-- Mô hình train hiện tại là linear Discrete CQL. Chưa phải BCQ/DQN sâu, nhưng đã là offline RL bảo thủ phù hợp hơn plain Q-learning cho replay buffer log.
-- Backend route cho non-HTTP (`ssh_honeypot`, `ftp_honeypot`, `smtp_honeypot`) là placeholder cho giai đoạn L4.
-- Dataset hiện tại synthetic; chất lượng thực tế cần dữ liệu từ log thật.
-
-## 11) Hướng phát triển tiếp
-
-- Tách feature computation còn nằm trong analyzer sang state builder package.
-- Tách rule fallback/guardrail của LLM analyzer thành module testable riêng.
-- Tune CQL hyperparameters (`cql_alpha`, `gamma`, reward weights) trên replay buffer tách từ traffic logs.
-- Thêm integration test đầy đủ: `log ingest -> state build -> RL decide -> routing update`.
+- RL state stays compact.
+- Evaluation logs can contain richer debug fields such as `route_matches_api_surface`, `expected_honeypot_backend`, and `analysis_duration_ms`.

@@ -14,16 +14,13 @@ if str(CONTROL_PLANE_DIR) not in sys.path:
 
 from state_builder import STATE_DIM, STATE_SCHEMA_VERSION, validate_state  # noqa: E402
 
-PROTOCOLS = ("http", "ssh", "ftp", "smtp")
+PROTOCOLS = ("http",)
 
 ACTION_KEEP_NORMAL = 0
 ACTION_ROUTE_SQLI = 1
 ACTION_ROUTE_SSTI = 2
 ACTION_ROUTE_CMDI = 3
 ACTION_ROUTE_SSRF = 4
-ACTION_ROUTE_SSH = 5
-ACTION_ROUTE_FTP = 6
-ACTION_ROUTE_SMTP = 7
 
 ACTIONS = [
     "KEEP_NORMAL",
@@ -31,9 +28,6 @@ ACTIONS = [
     "ROUTE_SSTI",
     "ROUTE_CMDI",
     "ROUTE_SSRF",
-    "ROUTE_SSH",
-    "ROUTE_FTP",
-    "ROUTE_SMTP",
 ]
 
 ACTION_TO_BACKEND = {
@@ -42,9 +36,6 @@ ACTION_TO_BACKEND = {
     ACTION_ROUTE_SSTI: "ssti_api",
     ACTION_ROUTE_CMDI: "cmdi_api",
     ACTION_ROUTE_SSRF: "ssrf_api",
-    ACTION_ROUTE_SSH: "ssh_honeypot",
-    ACTION_ROUTE_FTP: "ftp_honeypot",
-    ACTION_ROUTE_SMTP: "smtp_honeypot",
 }
 
 _ALLOWED_BY_PROTOCOL = {
@@ -55,9 +46,6 @@ _ALLOWED_BY_PROTOCOL = {
         ACTION_ROUTE_CMDI,
         ACTION_ROUTE_SSRF,
     ],
-    "ssh": [ACTION_KEEP_NORMAL, ACTION_ROUTE_SSH],
-    "ftp": [ACTION_KEEP_NORMAL, ACTION_ROUTE_FTP],
-    "smtp": [ACTION_KEEP_NORMAL, ACTION_ROUTE_SMTP],
 }
 
 

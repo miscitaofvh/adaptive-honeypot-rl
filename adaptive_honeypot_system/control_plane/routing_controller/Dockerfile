@@ -9,7 +9,8 @@ RUN apt-get update \
 COPY control_plane/routing_controller/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-COPY control_plane/rl_agent /app/control_plane/rl_agent
+RUN mkdir -p /app/control_plane/rl_agent/artifacts
+COPY control_plane/rl_agent/agent.py /app/control_plane/rl_agent/agent.py
 COPY control_plane/state_builder /app/control_plane/state_builder
 COPY control_plane/routing_controller /app/control_plane/routing_controller
 COPY gateway/routing_update.sh /app/gateway/routing_update.sh

@@ -48,8 +48,8 @@ settled_cleanup() {
 }
 trap cleanup EXIT
 
-echo "[1/6] Start Web MVP stack in normal-first mode with heuristic RL..."
-GROQ_API_KEY= TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=heuristic ANALYZER_ENABLED=true SERVICE_BODY_WAIT_SECONDS=8 docker compose up -d --build --force-recreate \
+echo "[1/6] Start Web MVP stack in normal-first mode with trained RL model..."
+GROQ_API_KEY= TEST_HONEYPOT=false EXPOSURE_MODE=debug RL_POLICY_MODE=model ANALYZER_ENABLED=true SERVICE_BODY_WAIT_SECONDS=8 docker compose up -d --build --force-recreate --remove-orphans \
   elasticsearch \
   backend \
   sqli_pot \
@@ -136,4 +136,4 @@ fi
 
 settled_cleanup
 
-echo "PASS: log -> analyzer -> heuristic RL/controller -> endpoint-scoped HAProxy route -> SQLi honeypot flow works."
+echo "PASS: log -> analyzer -> trained RL model/controller -> endpoint-scoped HAProxy route -> SQLi honeypot flow works."

@@ -347,7 +347,7 @@ def group_outcome_events(events: list[LoggedEvent]) -> dict[str, list[LoggedEven
 
 
 def events_in_window(events: list[LoggedEvent], start: float, end: float) -> list[LoggedEvent]:
-    return [event for event in events if start < event.timestamp <= end]
+    return [event for event in events if start <= event.timestamp <= end]
 
 
 def reward_for_transition(

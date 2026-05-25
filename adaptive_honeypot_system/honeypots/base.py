@@ -10,6 +10,20 @@ SENSITIVE_KEYS = {'password', 'token', 'access_token', 'authorization', 'secret'
 MAX_BODY_PREVIEW = 2048
 FILEBEAT_HOST = os.environ.get('FILEBEAT_HOST', 'filebeat')
 FILEBEAT_SERVICE_PORT = int(os.environ.get('FILEBEAT_SERVICE_PORT', '5141'))
+HOST_DEBUG_LOG_ENABLED = os.environ.get('HOST_DEBUG_LOG_ENABLED', 'true').strip().lower() in {'1', 'true', 'yes'}
+HOST_SERVICE_LOG_PATH = os.environ.get('HOST_SERVICE_LOG_PATH', '/var/log/adaptive-honeypot/service_requests.jsonl')
+SERVICE_TO_BACKEND = {
+    'sqli-honeypot': 'sqli_api',
+    'ssti-honeypot': 'ssti_api',
+    'cmdi-honeypot': 'cmdi_api',
+    'ssrf-honeypot': 'ssrf_api',
+}
+SURFACE_TO_EXPECTED_HONEYPOT_BACKEND = {
+    'articles_search': 'sqli_api',
+    'tools_ping': 'cmdi_api',
+    'tools_preview': 'ssti_api',
+    'tools_fetch': 'ssrf_api',
+}
 
 logger = logging.getLogger('honeypot')
 logger.setLevel(logging.INFO)
@@ -34,15 +48,35 @@ def health_payload(service_name=None):
 def log_request(extra=None):
     body_preview, payload_size = _safe_body()
     record = {'event_schema_version':'1.0','event_type':'honeypot_interaction',
-              'ts':int(datetime.now(timezone.utc).timestamp()),'service':SERVICE_NAME,'pot_type':POT_TYPE,
+              'ts':datetime.now(timezone.utc).timestamp(),'service':SERVICE_NAME,'pot_type':POT_TYPE,
               'request_id':getattr(g,'request_id',''),'method':request.method,'path':request.path,
               'query':request.query_string.decode('utf-8', errors='replace'),
               'remote_addr':request.remote_addr,'x_forwarded_for':request.headers.get('X-Forwarded-For',''),
               'session_id':request.cookies.get('sid',''),'user_agent':request.headers.get('User-Agent',''),
               'payload_size':payload_size,'body_preview':body_preview,
-              'duration_ms':round((time.monotonic()-g.start_time)*1000,2)}
+              'duration_ms':round((time.monotonic()-g.start_time)*1000,2),
+              'metric_source':'host_service_log','service_role':'honeypot','is_honeypot':True,
+              'observed_backend':SERVICE_TO_BACKEND.get(SERVICE_NAME, ''),
+              'api_surface':_api_surface(request.path),
+              'expected_honeypot_backend':SURFACE_TO_EXPECTED_HONEYPOT_BACKEND.get(_api_surface(request.path), '')}
     if extra: record.update(extra)
+    record['status_class'] = f"{int(record.get('status_code', 0)) // 100}xx" if record.get('status_code') else ''
+    expected_backend = record.get('expected_honeypot_backend') or ''
+    observed_backend = record.get('observed_backend') or ''
+    record['route_matches_api_surface'] = bool(expected_backend and observed_backend == expected_backend)
+    _write_host_debug_log(record)
     logger.info(json.dumps(record, ensure_ascii=True))
+
+def _write_host_debug_log(record):
+    if not HOST_DEBUG_LOG_ENABLED or not HOST_SERVICE_LOG_PATH:
+        return
+    try:
+        log_path = os.path.abspath(HOST_SERVICE_LOG_PATH)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=True) + '\n')
+    except Exception:
+        pass
 
 def _safe_body():
     try:
@@ -65,6 +99,23 @@ def _mask_value(key, value):
     if isinstance(value, list):
         return [_mask_value(key, item) for item in value]
     return value
+
+def _api_surface(path):
+    if path == '/api/health':
+        return 'health'
+    if path == '/api/articles/search':
+        return 'articles_search'
+    if path.startswith('/api/articles'):
+        return 'articles'
+    if path == '/api/tools/ping':
+        return 'tools_ping'
+    if path == '/api/tools/preview':
+        return 'tools_preview'
+    if path == '/api/tools/fetch':
+        return 'tools_fetch'
+    if path.startswith('/api/auth'):
+        return 'auth'
+    return 'other'
 
 def honeypot_middleware(app):
     @app.before_request

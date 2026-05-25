@@ -1,6 +1,6 @@
 services:
   # ============================================================
-  # GATEWAY - Unified L4/L7 Proxy with Advanced Logging
+  # GATEWAY - HTTP reverse proxy with adaptive Web routing
   # ============================================================
 
   gateway:
@@ -43,8 +43,11 @@ services:
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
       - FILEBEAT_HOST=filebeat
       - FILEBEAT_SERVICE_PORT=5141
+      - HOST_DEBUG_LOG_ENABLED=${HOST_DEBUG_LOG_ENABLED:-true}
+      - HOST_SERVICE_LOG_PATH=/var/log/adaptive-honeypot/service_requests.jsonl
     volumes:
       - backend_data:/data
+      - ./logs/real_backend:/var/log/adaptive-honeypot
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -73,6 +76,10 @@ services:
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
       - FILEBEAT_HOST=filebeat
       - FILEBEAT_SERVICE_PORT=5141
+      - HOST_DEBUG_LOG_ENABLED=${HOST_DEBUG_LOG_ENABLED:-true}
+      - HOST_SERVICE_LOG_PATH=/var/log/adaptive-honeypot/service_requests.jsonl
+    volumes:
+      - ./logs/honeypots/cmdi:/var/log/adaptive-honeypot
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -90,6 +97,10 @@ services:
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
       - FILEBEAT_HOST=filebeat
       - FILEBEAT_SERVICE_PORT=5141
+      - HOST_DEBUG_LOG_ENABLED=${HOST_DEBUG_LOG_ENABLED:-true}
+      - HOST_SERVICE_LOG_PATH=/var/log/adaptive-honeypot/service_requests.jsonl
+    volumes:
+      - ./logs/honeypots/sqli:/var/log/adaptive-honeypot
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -107,6 +118,10 @@ services:
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
       - FILEBEAT_HOST=filebeat
       - FILEBEAT_SERVICE_PORT=5141
+      - HOST_DEBUG_LOG_ENABLED=${HOST_DEBUG_LOG_ENABLED:-true}
+      - HOST_SERVICE_LOG_PATH=/var/log/adaptive-honeypot/service_requests.jsonl
+    volumes:
+      - ./logs/honeypots/ssti:/var/log/adaptive-honeypot
     networks:
       - adaptive_net
     restart: unless-stopped
@@ -124,38 +139,17 @@ services:
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
       - FILEBEAT_HOST=filebeat
       - FILEBEAT_SERVICE_PORT=5141
-    networks:
-      - adaptive_net
-    restart: unless-stopped
-
-  # ============================================================
-  # CONTROL PLANE - RL Agent + Routing Controller
-  # ============================================================
-  rl_agent:
-    build:
-      context: .
-      dockerfile: control_plane/rl_agent/Dockerfile
-    container_name: adaptive-rl-agent
-    ports:
-      - "8003:8003"
-    environment:
-      - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
-      - RL_AGENT_INIT_MODE=${RL_AGENT_INIT_MODE:-web_policy}
-      - RL_AGENT_AUTO_EXPORT=${RL_AGENT_AUTO_EXPORT:-false}
-      - RL_AGENT_SEED=${RL_AGENT_SEED:-42}
-      - RL_MODEL_OUTPUT_PATH=/app/control_plane/rl_agent/artifacts/rl_agent_linear.json
+      - HOST_DEBUG_LOG_ENABLED=${HOST_DEBUG_LOG_ENABLED:-true}
+      - HOST_SERVICE_LOG_PATH=/var/log/adaptive-honeypot/service_requests.jsonl
     volumes:
-      - ./control_plane/rl_agent/artifacts:/app/control_plane/rl_agent/artifacts
-      - ./control_plane/rl_agent/data:/app/control_plane/rl_agent/data
+      - ./logs/honeypots/ssrf:/var/log/adaptive-honeypot
     networks:
       - adaptive_net
     restart: unless-stopped
-    healthcheck:
-      test: python -c "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"
-      interval: 20s
-      timeout: 5s
-      retries: 3
 
+  # ============================================================
+  # CONTROL PLANE - Routing Controller
+  # ============================================================
   routing_controller:
     build:
       context: .
@@ -165,9 +159,8 @@ services:
       - "8001:8001"
     environment:
       - RL_MODEL_PATH=/app/control_plane/rl_agent/artifacts/rl_agent_linear.json
-      - RL_POLICY_MODE=${RL_POLICY_MODE:-heuristic}
+      - RL_POLICY_MODE=${RL_POLICY_MODE:-model}
       - HEURISTIC_ROUTE_THRESHOLD=${HEURISTIC_ROUTE_THRESHOLD:-0.45}
-      - L4_ROUTING_ENABLED=false
       - ROUTING_UPDATE_SCRIPT=/app/gateway/routing_update.sh
       - ROUTING_COMMAND_TIMEOUT=5
       - EXPOSURE_MODE=${EXPOSURE_MODE:-debug}
@@ -214,6 +207,10 @@ services:
       - CONTROL_PLANE_SYSLOG=${CONTROL_PLANE_SYSLOG:-true}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - HOST_DEBUG_LOG_ENABLED=${HOST_DEBUG_LOG_ENABLED:-true}
+      - HOST_LLM_FIELDS_LOG_PATH=/var/log/adaptive-honeypot/llm_fields.jsonl
+    volumes:
+      - ./logs/llm_analyzer:/var/log/adaptive-honeypot
     depends_on:
       - elasticsearch
       - routing_controller
@@ -227,7 +224,7 @@ services:
       retries: 3
 
   # ============================================================
-  # OBSERVABILITY - SIEM & Monitoring
+  # OBSERVABILITY - log ingest for analyzer/replay export
   # ============================================================
 
   elasticsearch:
@@ -251,30 +248,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.0
-    container_name: adaptive-kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
-      - SERVER_NAME=kibana
-      - xpack.security.enabled=false
-      - telemetry.enabled=false
-      - NODE_OPTIONS=--max-old-space-size=512
-    volumes:
-      - ./observability/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
-    ports:
-      - "5601:5601"
-    networks:
-      - adaptive_net
-    depends_on:
-      - elasticsearch
-    restart: unless-stopped
-    healthcheck:
-      test: curl -s http://localhost:5601/app/kibana >/dev/null || exit 1
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   filebeat:
     image: docker.elastic.co/beats/filebeat:8.11.0

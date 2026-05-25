@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List
 
-STATE_SCHEMA_VERSION = "rl_state_v2_16"
+STATE_SCHEMA_VERSION = "web_state"
 
 STATE_FIELD_NAMES = [
     "session_age_norm",

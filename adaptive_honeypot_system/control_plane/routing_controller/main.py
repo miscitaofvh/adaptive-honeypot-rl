@@ -22,6 +22,7 @@ if str(RL_DIR) not in sys.path:
     sys.path.insert(0, str(RL_DIR))
 
 from agent import (  # noqa: E402
+    ACTIONS,
     ACTION_KEEP_NORMAL,
     ACTION_ROUTE_CMDI,
     ACTION_ROUTE_SQLI,
@@ -50,7 +51,6 @@ EXPOSURE_MODE = os.getenv("EXPOSURE_MODE", "debug").strip().lower()
 DEBUG_EXPOSURE_VALUES = {"debug", "dev", "development", "operator", "test"}
 DEBUG_EXPOSURE = EXPOSURE_MODE in DEBUG_EXPOSURE_VALUES
 HEURISTIC_ROUTE_THRESHOLD = float(os.getenv("HEURISTIC_ROUTE_THRESHOLD", "0.45"))
-L4_ROUTING_ENABLED = os.getenv("L4_ROUTING_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 SESSION_ROUTES_MAP = Path(os.getenv("SESSION_ROUTES_MAP", "/etc/haproxy/maps/session_routes.map"))
 IP_HONEYPOT_MAP = Path(os.getenv("IP_HONEYPOT_MAP", "/etc/haproxy/maps/ip_honeypot.map"))
 FILEBEAT_HOST = os.getenv("FILEBEAT_HOST", "filebeat")
@@ -63,12 +63,6 @@ HTTP_BACKENDS = {
     "ssti_api",
     "cmdi_api",
     "ssrf_api",
-}
-
-L4_PLACEHOLDER_BACKENDS = {
-    "ssh_honeypot",
-    "ftp_honeypot",
-    "smtp_honeypot",
 }
 
 model_lock = threading.Lock()
@@ -119,8 +113,8 @@ class DecisionRequest(BaseModel):
     @classmethod
     def normalize_protocol(cls, value: str) -> str:
         value = value.strip().lower()
-        if value not in {"http", "ssh", "ftp", "smtp"}:
-            raise ValueError("protocol must be one of: http, ssh, ftp, smtp")
+        if value != "http":
+            raise ValueError("protocol must be http")
         return value
 
     @field_validator("state_schema")
@@ -168,25 +162,8 @@ class ClearRoutesResponse(BaseModel):
 
 def ensure_valid_backend(backend: str, protocol: str = "http") -> str:
     backend = backend.strip()
-    if backend in L4_PLACEHOLDER_BACKENDS and not L4_ROUTING_ENABLED:
-        raise HTTPException(
-            status_code=501,
-            detail={
-                "message": "L4 routing is intentionally disabled in the current Web MVP",
-                "backend": backend,
-                "protocol": protocol,
-            },
-        )
-
-    if protocol != "http" and not L4_ROUTING_ENABLED:
-        raise HTTPException(
-            status_code=501,
-            detail={
-                "message": "Non-HTTP Drop-and-Catch routing is not implemented in this milestone",
-                "protocol": protocol,
-            },
-        )
-
+    if protocol != "http":
+        raise HTTPException(status_code=400, detail="Only HTTP routing is supported in the Web-only scope")
     if backend not in HTTP_BACKENDS:
         raise HTTPException(
             status_code=400,
@@ -226,7 +203,7 @@ def run_command(args: List[str]) -> str:
 
 
 def select_policy_action(req: DecisionRequest) -> int:
-    if POLICY_MODE in {"heuristic", "dummy", "rule", "rules"}:
+    if POLICY_MODE in {"heuristic", "rule", "rules"}:
         return heuristic_action(req.state, req.protocol)
 
     with model_lock:
@@ -235,7 +212,7 @@ def select_policy_action(req: DecisionRequest) -> int:
 
 
 def heuristic_action(state: List[float], protocol: str) -> int:
-    """Deterministic dummy RL policy for the Web MVP.
+    """Legacy deterministic rule fallback for operator troubleshooting.
 
     It consumes the v2 16D state vector. The policy is
     deliberately conservative: keep benign traffic normal, but route strong
@@ -271,45 +248,21 @@ def apply_route_decision(req: DecisionRequest, action_idx: int, backend: str) ->
 
     command: List[str]
 
-    if req.protocol == "http":
-        chosen_backend = ensure_valid_backend(backend, req.protocol)
-        # Keep proposal-aligned behavior (session-level on HTTP) and allow IP-level fallback for split-client tests.
-        if req.session_id:
-            if action_idx == ACTION_KEEP_NORMAL:
-                command = [str(ROUTING_SCRIPT), "remove_session", req.session_id]
-            else:
-                command = [str(ROUTING_SCRIPT), "add_session", req.session_id, chosen_backend]
-        elif req.source_ip:
-            source_ip = ensure_valid_ip(req.source_ip)
-            if action_idx == ACTION_KEEP_NORMAL:
-                command = [str(ROUTING_SCRIPT), "remove_ip", source_ip]
-            else:
-                command = [str(ROUTING_SCRIPT), "add_ip", source_ip, chosen_backend]
+    chosen_backend = ensure_valid_backend(backend, req.protocol)
+    # Keep proposal-aligned behavior (session-level on HTTP) and allow IP-level fallback for split-client tests.
+    if req.session_id:
+        if action_idx == ACTION_KEEP_NORMAL:
+            command = [str(ROUTING_SCRIPT), "remove_session", req.session_id]
         else:
-            raise HTTPException(status_code=400, detail="session_id or source_ip is required for HTTP routing updates")
-    else:
-        if not L4_ROUTING_ENABLED:
-            if action_idx == ACTION_KEEP_NORMAL:
-                return False, None, "L4 routing disabled; KEEP_NORMAL does not require a route update"
-            raise HTTPException(
-                status_code=501,
-                detail={
-                    "message": "L4 Drop-and-Catch routing is not implemented in this milestone",
-                    "protocol": req.protocol,
-                    "backend": backend,
-                },
-            )
-
-        if not req.source_ip:
-            raise HTTPException(status_code=400, detail="source_ip is required for non-HTTP routing updates")
-
+            command = [str(ROUTING_SCRIPT), "add_session", req.session_id, chosen_backend]
+    elif req.source_ip:
         source_ip = ensure_valid_ip(req.source_ip)
-        chosen_backend = ensure_valid_backend(backend, req.protocol)
-
         if action_idx == ACTION_KEEP_NORMAL:
             command = [str(ROUTING_SCRIPT), "remove_ip", source_ip]
         else:
             command = [str(ROUTING_SCRIPT), "add_ip", source_ip, chosen_backend]
+    else:
+        raise HTTPException(status_code=400, detail="session_id or source_ip is required for HTTP routing updates")
 
     try:
         output = run_command(command)
@@ -396,6 +349,13 @@ def try_load_model(path: Path) -> tuple[bool, str]:
                 f"Model state_dim {loaded_agent.state_dim} does not match runtime {STATE_DIM}. "
                 "Using untrained agent.",
             )
+        if loaded_agent.action_space != ACTIONS:
+            agent = LinearQAgent(seed=123)
+            return (
+                False,
+                f"Model actions {loaded_agent.action_space} do not match runtime {ACTIONS}. "
+                "Using untrained agent.",
+            )
         agent = loaded_agent
     return True, f"Model loaded from {path}"
 
@@ -430,7 +390,6 @@ def health() -> dict:
         "state_schema": STATE_SCHEMA_VERSION,
         "state_dim": STATE_DIM,
         "heuristic_route_threshold": HEURISTIC_ROUTE_THRESHOLD,
-        "l4_routing_enabled": L4_ROUTING_ENABLED,
         "implemented_backends": sorted(HTTP_BACKENDS),
     }
 

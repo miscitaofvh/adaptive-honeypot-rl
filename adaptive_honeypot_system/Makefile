@@ -1,22 +1,34 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data export-replay-buffer train-rl train-rl-replay train-rl-fresh make-dummy-model make-dummy-web-model rl-agent-export rl-agent-one-epoch clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer evaluate-metrics train-rl train-rl-replay train-rl-fresh clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
 PROJECT_NAME := adaptive-honeypot-rl
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 GATEWAY_URL := http://localhost:18080
-RL_AGENT_URL := http://localhost:8003
+PYTHON ?= python
 RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
 RL_REPLAY_BUFFER := control_plane/rl_agent/data/replay_buffer.jsonl
+RL_REPLAY_EVENTS := control_plane/replay_buffer/data/generated_events.jsonl
+METRICS_REPORT := logs/metrics_report.json
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
-RL_DATASET_CONTAINER := /app/control_plane/rl_agent/data/fake_transitions.jsonl
-RL_REPLAY_BUFFER_CONTAINER := /app/control_plane/rl_agent/data/replay_buffer.jsonl
-RL_MODEL_CONTAINER := /app/control_plane/rl_agent/artifacts/rl_agent_linear.json
+RL_SYNTHETIC_SESSIONS := 10000
+RL_SYNTHETIC_MIN_STEPS := 8
+RL_SYNTHETIC_MAX_STEPS := 12
+RL_SYNTHETIC_SEED := 20260524
+RL_REPLAY_SESSIONS := 48
+RL_REPLAY_SEED := 20260524
 RL_ALGORITHM := cql
+RL_EPOCHS := 40
+RL_BATCH_SIZE := 256
+RL_LEARNING_RATE := 0.003
+RL_BEHAVIOR_CLONING_WEIGHT := 0.50
+RL_INIT_POLICY := web_prior
+RL_DEVICE := cpu
+RL_LOG_EVERY := 5
 CQL_ALPHA := 0.50
 CQL_TEMPERATURE := 1.0
 RL_TARGET_UPDATE_PERIOD := 1
-EXPOSURE_SERVICES := gateway backend cmdi_pot sqli_pot ssti_pot ssrf_pot routing_controller llm_analyzer rl_agent
+EXPOSURE_SERVICES := gateway backend cmdi_pot sqli_pot ssti_pot ssrf_pot routing_controller llm_analyzer
 
 # Colors for output
 CYAN := \033[0;36m
@@ -58,8 +70,7 @@ help:
 	@echo "  $(CYAN)logs-sqli$(RESET)          Show SQLi honeypot logs"
 	@echo "  $(CYAN)logs-ssti$(RESET)          Show SSTI honeypot logs"
 	@echo "  $(CYAN)logs-ssrf$(RESET)          Show SSRF honeypot logs"
-	@echo "  $(CYAN)logs-siem$(RESET)          Show Elasticsearch & Kibana logs"
-	@echo "  $(CYAN)logs-rl-agent$(RESET)      Show Torch RL agent logs"
+	@echo "  $(CYAN)logs-ingest$(RESET)        Show Elasticsearch & Filebeat logs"
 	@echo ""
 	@echo "$(YELLOW)TESTING:$(RESET)"
 	@echo "  $(CYAN)test-api$(RESET)           Test API endpoint (/api/health)"
@@ -74,14 +85,12 @@ help:
 	@echo ""
 	@echo "$(YELLOW)RL TRAINING:$(RESET)"
 	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate synthetic transitions for offline RL"
+	@echo "  $(CYAN)generate-replay-buffer$(RESET) Drive Web traffic and export host logs to replay buffer"
 	@echo "  $(CYAN)export-replay-buffer$(RESET) Export runtime logs to offline RL replay buffer"
-	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent from synthetic dataset"
-	@echo "  $(CYAN)train-rl-replay$(RESET)    Train RL agent from exported replay buffer"
-	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model end-to-end"
-	@echo "  $(CYAN)make-dummy-model$(RESET)   Build deterministic dummy model (always SSTI for HTTP)"
-	@echo "  $(CYAN)make-dummy-web-model$(RESET) Build deterministic subtype-based web dummy model"
-	@echo "  $(CYAN)rl-agent-export$(RESET)    Export Torch RL service model artifact"
-	@echo "  $(CYAN)rl-agent-one-epoch$(RESET) Run one tiny Torch epoch and export artifact"
+	@echo "  $(CYAN)evaluate-metrics$(RESET)   Evaluate proposal metrics from host-mounted logs"
+	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent locally from synthetic dataset"
+	@echo "  $(CYAN)train-rl-replay$(RESET)    Train RL agent locally from exported replay buffer"
+	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model locally"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -105,7 +114,7 @@ build:
 ## Start services
 up:
 	@echo "$(CYAN)[Starting all containers...]$(RESET)"
-	$(DOCKER_COMPOSE) up -d --build
+	$(DOCKER_COMPOSE) up -d --build --remove-orphans
 	@echo "$(GREEN)✓ All services started$(RESET)"
 	@sleep 5
 	@make ps
@@ -165,21 +174,18 @@ logs-ssti:
 logs-ssrf:
 	@$(DOCKER_COMPOSE) logs -f ssrf_pot
 
-logs-siem:
-	@$(DOCKER_COMPOSE) logs -f elasticsearch kibana filebeat
+logs-ingest:
+	@$(DOCKER_COMPOSE) logs -f elasticsearch filebeat
 
 logs-analyzer:
 	@$(DOCKER_COMPOSE) logs -f llm_analyzer routing_controller
-
-logs-rl-agent:
-	@$(DOCKER_COMPOSE) logs -f rl_agent
 
 ## Mode switching
 mode-normal:
 	@echo "$(CYAN)[Switching to NORMAL mode (TEST_HONEYPOT=false)]$(RESET)"
 	@sed -i.bak 's/TEST_HONEYPOT=.*/TEST_HONEYPOT=false/' .env
 	@echo "$(YELLOW)Updated .env file$(RESET)"
-	@$(DOCKER_COMPOSE) up -d --no-deps --build gateway
+	@$(DOCKER_COMPOSE) up -d --no-deps --build --remove-orphans gateway
 	@echo "$(GREEN)✓ Gateway restarted in NORMAL mode (traffic → real backend)$(RESET)"
 	@sleep 3
 	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
@@ -188,7 +194,7 @@ mode-honeypot:
 	@echo "$(CYAN)[Switching to HONEYPOT mode (TEST_HONEYPOT=true)]$(RESET)"
 	@sed -i.bak 's/TEST_HONEYPOT=.*/TEST_HONEYPOT=true/' .env
 	@echo "$(YELLOW)Updated .env file$(RESET)"
-	@$(DOCKER_COMPOSE) up -d --no-deps --build gateway
+	@$(DOCKER_COMPOSE) up -d --no-deps --build --remove-orphans gateway
 	@echo "$(GREEN)✓ Gateway restarted in HONEYPOT mode (traffic → honeypots)$(RESET)"
 	@sleep 3
 	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
@@ -202,7 +208,7 @@ mode-debug:
 		printf '\nEXPOSURE_MODE=debug\n' >> .env; \
 	fi
 	@echo "$(YELLOW)Updated .env file$(RESET)"
-	@$(DOCKER_COMPOSE) up -d --no-deps --build --force-recreate $(EXPOSURE_SERVICES)
+	@$(DOCKER_COMPOSE) up -d --no-deps --build --force-recreate --remove-orphans $(EXPOSURE_SERVICES)
 	@echo "$(GREEN)✓ Debug exposure enabled$(RESET)"
 	@sleep 3
 	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
@@ -216,7 +222,7 @@ mode-attack:
 		printf '\nEXPOSURE_MODE=attack\n' >> .env; \
 	fi
 	@echo "$(YELLOW)Updated .env file$(RESET)"
-	@$(DOCKER_COMPOSE) up -d --no-deps --build --force-recreate $(EXPOSURE_SERVICES)
+	@$(DOCKER_COMPOSE) up -d --no-deps --build --force-recreate --remove-orphans $(EXPOSURE_SERVICES)
 	@echo "$(GREEN)✓ Attack-facing exposure enabled$(RESET)"
 	@sleep 3
 	@curl -s $(GATEWAY_URL)/api/health || echo "Health check failed"
@@ -309,75 +315,77 @@ clear-routes:
 
 test-honeypots:
 	@echo "$(CYAN)[Running standalone honeypot tests...]$(RESET)"
-	@python ../test_honeypots.py
+	@$(PYTHON) ../test_honeypots.py
 
 ## RL offline training
 gen-fake-data:
 	@echo "$(CYAN)[Generating synthetic RL dataset...]$(RESET)"
-	@python control_plane/rl_agent/generate_fake_data.py --output $(RL_DATASET)
+	@$(PYTHON) control_plane/rl_agent/generate_fake_data.py \
+		--output $(RL_DATASET) \
+		--sessions $(RL_SYNTHETIC_SESSIONS) \
+		--min-steps $(RL_SYNTHETIC_MIN_STEPS) \
+		--max-steps $(RL_SYNTHETIC_MAX_STEPS) \
+		--seed $(RL_SYNTHETIC_SEED)
+
+generate-replay-buffer:
+	@echo "$(CYAN)[Generating replay buffer via Web traffic + host logs...]$(RESET)"
+	@$(PYTHON) control_plane/replay_buffer/generate_web_replay_buffer.py \
+		--sessions $(RL_REPLAY_SESSIONS) \
+		--seed $(RL_REPLAY_SEED) \
+		--event-output $(RL_REPLAY_EVENTS) \
+		--output $(RL_REPLAY_BUFFER)
 
 export-replay-buffer:
 	@echo "$(CYAN)[Exporting replay buffer from runtime logs...]$(RESET)"
-	@python control_plane/replay_buffer/export_replay_buffer.py --output $(RL_REPLAY_BUFFER)
+	@$(PYTHON) control_plane/replay_buffer/export_replay_buffer.py --output $(RL_REPLAY_BUFFER)
+
+evaluate-metrics:
+	@echo "$(CYAN)[Evaluating proposal metrics from host-mounted logs...]$(RESET)"
+	@$(PYTHON) control_plane/replay_buffer/evaluate_metrics.py \
+		--logs-dir logs \
+		--output $(METRICS_REPORT) \
+		--pretty
 
 train-rl:
-	@echo "$(CYAN)[Training offline RL agent...]$(RESET)"
-	@$(DOCKER_COMPOSE) run --rm --no-deps -u "$$(id -u):$$(id -g)" rl_agent \
-		python -B train_offline.py \
-		--dataset $(RL_DATASET_CONTAINER) \
-		--output $(RL_MODEL_CONTAINER) \
+	@echo "$(CYAN)[Training offline RL agent locally...]$(RESET)"
+	@test -f $(RL_DATASET) || (echo "$(RED)Missing dataset: $(RL_DATASET). Run: make gen-fake-data$(RESET)"; exit 1)
+	@$(PYTHON) -c "import torch" >/dev/null 2>&1 || (echo "$(RED)Missing torch for $(PYTHON). Activate venv or run: $(PYTHON) -m pip install -r control_plane/rl_agent/requirements-local.txt$(RESET)"; exit 1)
+	@$(PYTHON) -B control_plane/rl_agent/train_offline.py \
+		--dataset $(RL_DATASET) \
+		--output $(RL_MODEL) \
 		--algorithm $(RL_ALGORITHM) \
+		--epochs $(RL_EPOCHS) \
+		--batch-size $(RL_BATCH_SIZE) \
+		--learning-rate $(RL_LEARNING_RATE) \
 		--cql-alpha $(CQL_ALPHA) \
 		--cql-temperature $(CQL_TEMPERATURE) \
-		--target-update-period $(RL_TARGET_UPDATE_PERIOD)
+		--behavior-cloning-weight $(RL_BEHAVIOR_CLONING_WEIGHT) \
+		--init-policy $(RL_INIT_POLICY) \
+		--target-update-period $(RL_TARGET_UPDATE_PERIOD) \
+		--device $(RL_DEVICE) \
+		--log-every $(RL_LOG_EVERY)
 
 train-rl-replay:
-	@echo "$(CYAN)[Training offline RL agent from replay buffer...]$(RESET)"
-	@$(DOCKER_COMPOSE) run --rm --no-deps -u "$$(id -u):$$(id -g)" rl_agent \
-		python -B train_offline.py \
-		--dataset $(RL_REPLAY_BUFFER_CONTAINER) \
-		--output $(RL_MODEL_CONTAINER) \
+	@echo "$(CYAN)[Training offline RL agent locally from replay buffer...]$(RESET)"
+	@test -f $(RL_REPLAY_BUFFER) || (echo "$(RED)Missing replay buffer: $(RL_REPLAY_BUFFER). Run: make export-replay-buffer$(RESET)"; exit 1)
+	@$(PYTHON) -c "import torch" >/dev/null 2>&1 || (echo "$(RED)Missing torch for $(PYTHON). Activate venv or run: $(PYTHON) -m pip install -r control_plane/rl_agent/requirements-local.txt$(RESET)"; exit 1)
+	@$(PYTHON) -B control_plane/rl_agent/train_offline.py \
+		--dataset $(RL_REPLAY_BUFFER) \
+		--output $(RL_MODEL) \
 		--algorithm $(RL_ALGORITHM) \
+		--epochs $(RL_EPOCHS) \
+		--batch-size $(RL_BATCH_SIZE) \
+		--learning-rate $(RL_LEARNING_RATE) \
 		--cql-alpha $(CQL_ALPHA) \
 		--cql-temperature $(CQL_TEMPERATURE) \
-		--target-update-period $(RL_TARGET_UPDATE_PERIOD)
+		--behavior-cloning-weight $(RL_BEHAVIOR_CLONING_WEIGHT) \
+		--init-policy $(RL_INIT_POLICY) \
+		--target-update-period $(RL_TARGET_UPDATE_PERIOD) \
+		--device $(RL_DEVICE) \
+		--log-every $(RL_LOG_EVERY)
 
 train-rl-fresh: gen-fake-data train-rl
 	@echo "$(GREEN)✓ RL dataset + training completed$(RESET)"
-
-make-dummy-model:
-	@echo "$(CYAN)[Creating dummy SSTI routing model...]$(RESET)"
-	@python control_plane/rl_agent/create_dummy_ssti_model.py --output $(RL_MODEL)
-
-make-dummy-web-model:
-	@echo "$(CYAN)[Creating deterministic web subtype routing model...]$(RESET)"
-	@python control_plane/rl_agent/create_dummy_web_policy_model.py --output $(RL_MODEL)
-
-rl-agent-export:
-	@echo "$(CYAN)[Exporting Torch RL agent artifact...]$(RESET)"
-	@$(DOCKER_COMPOSE) up -d --build rl_agent
-	@for i in $$(seq 1 30); do \
-		curl -fsS $(RL_AGENT_URL)/health >/dev/null 2>&1 && break; \
-		if [ "$$i" = "30" ]; then echo "$(RED)RL agent did not become ready$(RESET)"; exit 1; fi; \
-		sleep 1; \
-	done
-	@curl -fsS $(RL_AGENT_URL)/health | grep -q '"exposure_mode":"debug"' || \
-		(echo "$(RED)RL agent export requires EXPOSURE_MODE=debug. Run: make mode-debug$(RESET)"; exit 1)
-	@curl -fsS -X POST $(RL_AGENT_URL)/export | (jq . 2>/dev/null || cat)
-
-rl-agent-one-epoch:
-	@echo "$(CYAN)[Running one tiny Torch RL epoch and exporting artifact...]$(RESET)"
-	@$(DOCKER_COMPOSE) up -d --build rl_agent
-	@for i in $$(seq 1 30); do \
-		curl -fsS $(RL_AGENT_URL)/health >/dev/null 2>&1 && break; \
-		if [ "$$i" = "30" ]; then echo "$(RED)RL agent did not become ready$(RESET)"; exit 1; fi; \
-		sleep 1; \
-	done
-	@curl -fsS $(RL_AGENT_URL)/health | grep -q '"exposure_mode":"debug"' || \
-		(echo "$(RED)RL agent one-epoch requires EXPOSURE_MODE=debug. Run: make mode-debug$(RESET)"; exit 1)
-	@curl -fsS -X POST $(RL_AGENT_URL)/train/one-epoch \
-		-H "Content-Type: application/json" \
-		-d '{"learning_rate":0.01,"export_after":true}' | (jq . 2>/dev/null || cat)
 
 test-rl-split-ip:
 	@echo "$(CYAN)[Running split IP routing test via routing controller...]$(RESET)"
@@ -393,7 +401,7 @@ test-adaptive-attacks:
 
 validate:
 	@echo "$(CYAN)[Python syntax check...]$(RESET)"
-	@python -m py_compile \
+	@$(PYTHON) -m py_compile \
 		../test_honeypots.py \
 		real_service/backend/app.py \
 		real_service/backend/logging_utils.py \
@@ -412,11 +420,10 @@ validate:
 		control_plane/rl_agent/agent.py \
 		control_plane/rl_agent/generate_fake_data.py \
 		control_plane/rl_agent/train_offline.py \
-		control_plane/rl_agent/service.py \
-		control_plane/rl_agent/create_dummy_ssti_model.py \
-		control_plane/rl_agent/create_dummy_web_policy_model.py \
 		control_plane/replay_buffer/__init__.py \
 		control_plane/replay_buffer/export_replay_buffer.py \
+		control_plane/replay_buffer/evaluate_metrics.py \
+		control_plane/replay_buffer/generate_web_replay_buffer.py \
 		control_plane/routing_controller/main.py \
 		control_plane/llm_analyzer/analyzer.py
 	@echo "$(GREEN)✓ Syntax check complete$(RESET)"
@@ -503,7 +510,6 @@ info:
 	@echo "  • SQLi Honeypot............. http://localhost:5003"
 	@echo "  • SSTI Honeypot............. http://localhost:5004"
 	@echo "  • SSRF Honeypot............. http://localhost:5005"
-	@echo "  • Kibana Dashboard.......... http://localhost:5601"
 	@echo "  • HAProxy Stats............. http://localhost:8404/stats"
 	@echo ""
 	@echo "$(YELLOW)Common Commands:$(RESET)"

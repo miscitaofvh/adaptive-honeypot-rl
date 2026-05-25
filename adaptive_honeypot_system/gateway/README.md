@@ -8,7 +8,7 @@ Chuc nang:
 - Phuc vu frontend mac dinh.
 - Route `/api/*` vao real backend hoac web honeypots.
 - Doc `sid` cookie de ho tro mid-session rerouting cho Web.
-- Doc source-IP map de ho tro test split-client va sau nay mo rong L4.
+- Doc source-IP map de ho tro test split-client.
 - Expose HAProxy stats tai `localhost:8404/stats` trong debug mode.
 
 File chinh:
@@ -35,6 +35,6 @@ Vi du neu `sid` duoc map toi `sqli_api`, chi request search cua session do vao S
 
 Luu y:
 
-- Gateway hien la HTTP-only. L4 Drop-and-Catch trong proposal chua implement.
+- Gateway hien la HTTP-only theo scope Web cua do an hien tai.
 - Control plane khong nam tren request path; no chi cap nhat map bat dong bo.
 - `EXPOSURE_MODE=attack` cat block Stats UI khoi HAProxy config runtime; admin socket van duoc giu trong container de routing controller cap nhat map.

@@ -132,7 +132,7 @@ Thông qua state builder, các state này sẽ được kết hợp cùng các s
 
 ## 8. RL Formulation (BCQ hoặc các thuật toán khác)
 ### 8.1 State
-Vector state v2 được tinh gọn để giảm số chiều nhưng vẫn mở rộng được sang HTTP/SSH/FTP/SMTP. `protocol` không nằm trong tensor mà là metadata bắt buộc gửi kèm `/decide`; controller dùng metadata này để action masking và chọn profile normalize theo giao thức.
+State vector được tinh gọn để giảm số chiều nhưng vẫn mở rộng được sang HTTP/SSH/FTP/SMTP. `protocol` không nằm trong tensor mà là metadata bắt buộc gửi kèm `/decide`; controller dùng metadata này để action masking và chọn profile normalize theo giao thức.
 
 ```python
 state = {
@@ -260,13 +260,13 @@ Trong đó:
 - **Infrastructure**: Docker Compose
 
 ## 11. Demo Plan
-### Tối thiểu (WEB - Có hỗ trợ Adaptive Rerouting)
 Benign session -> Phục vụ bình thường tại Normal API.
 
 Single-attack session -> Định tuyến lại vào honeypot tương ứng (SQLI_POT, SSTI_POT...).
 
 Multi-attack session: Cho phép định tuyến linh hoạt giữa nhiều loại honeypot web khác nhau trong cùng một session dựa trên TTPs đang thay đổi.
 
+## Out of scope cho demo:
 ### L4 Protocols (SSH/FTP - Drop-and-Catch)
 * Attacker bruteforce SSH -> Rớt kết nối -> Reconnect bị bẻ vào Cowrie.
 * Attacker bruteforce FTP hoặc liệt kê file/path -> reconnect bị định tuyến vào Dionaea.
