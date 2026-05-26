@@ -454,18 +454,24 @@ health:
 	@curl -s -I http://localhost:8404/stats 2>&1 | head -1 || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Backend:$(RESET)"
-	@curl -s $(GATEWAY_URL)/api/health | jq . 2>/dev/null || echo "❌ Unreachable"
+	@body=$$(curl -fsS $(GATEWAY_URL)/api/health 2>/dev/null || true); \
+	if [ -n "$$body" ]; then \
+		printf '%s\n' "$$body" | $(PYTHON) -m json.tool 2>/dev/null || printf '%s\n' "$$body"; \
+	else \
+		echo "❌ Unreachable"; \
+	fi
 	@echo ""
 	@echo "$(YELLOW)Frontend:$(RESET)"
 	@curl -s -I $(GATEWAY_URL) 2>&1 | head -1 || echo "❌ Unreachable"
 	@echo ""
 	@echo "$(YELLOW)Honeypots (direct ports):$(RESET)"
 	@for p in 5002 5003 5004 5005; do \
-		body=$$(curl -s "http://localhost:$$p/api/health"); \
-		service=$$(printf '%s' "$$body" | jq -r '.service // empty' 2>/dev/null); \
+		body=$$(curl -fsS "http://localhost:$$p/api/health" 2>/dev/null || true); \
+		service=$$(printf '%s' "$$body" | $(PYTHON) -c 'import json,sys; print(json.load(sys.stdin).get("service", ""))' 2>/dev/null || true); \
+		status=$$(printf '%s' "$$body" | $(PYTHON) -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))' 2>/dev/null || true); \
 		if [ -n "$$service" ]; then \
 			echo "  • Port $$p → $$service"; \
-		elif printf '%s' "$$body" | jq -e '.status == "ok"' >/dev/null 2>&1; then \
+		elif [ "$$status" = "ok" ]; then \
 			echo "  • Port $$p → healthy (generic attack-mode health)"; \
 		else \
 			echo "  • Port $$p → unreachable"; \
@@ -511,6 +517,7 @@ info:
 	@echo "  • SSTI Honeypot............. http://localhost:5004"
 	@echo "  • SSRF Honeypot............. http://localhost:5005"
 	@echo "  • HAProxy Stats............. http://localhost:8404/stats"
+	@echo "  • Kibana Debug UI.......... http://localhost:5601"
 	@echo ""
 	@echo "$(YELLOW)Common Commands:$(RESET)"
 	@echo "  make up                 # Start all services"

@@ -22,6 +22,7 @@ Gateway/frontend:    http://localhost:18080
 Routing controller:  http://localhost:8001
 LLM analyzer:        http://localhost:8002
 Elasticsearch:       http://localhost:9200
+Kibana debug UI:     http://localhost:5601
 ```
 
 ## Modes

@@ -20,7 +20,7 @@ Không làm trong phạm vi hiện tại:
 
 - SSH/FTP/SMTP.
 - L4 Drop-and-Catch.
-- Monitoring/Kibana dashboard như một deliverable.
+- Xây dashboard monitoring mới như một deliverable. Kibana vẫn có trong stack để debug Elasticsearch logs khi cần.
 - Bảo vệ/chặn real service. Mục tiêu là route đúng honeypot và kéo dài engagement.
 
 ## Runtime Flow
@@ -55,7 +55,7 @@ adaptive_honeypot_system/
   gateway/                         HAProxy config + runtime map update script
   real_service/                    React frontend + Flask backend
   honeypots/                       SQLi/SSTI/CMDi/SSRF Flask honeypots
-  observability/                   Filebeat + Elasticsearch log ingest
+  observability/                   Filebeat + Elasticsearch + optional Kibana debug UI
   logs/                            host-mounted debug/evaluation logs
   control_plane/
     llm_analyzer/analyzer.py       log polling, body enrichment, semantic extraction
