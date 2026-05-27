@@ -1,12 +1,12 @@
 # Command Reference
 
-Chạy các lệnh trong thư mục:
+Các lệnh dưới đây chạy trong thư mục:
 
 ```bash
 cd adaptive_honeypot_system
 ```
 
-## Start And Health
+## Deploy
 
 ```bash
 cp .env.example .env
@@ -15,98 +15,44 @@ docker compose ps
 make health
 ```
 
-URLs chính:
+URLs:
 
 ```text
-Gateway/frontend:    http://localhost:18080
+Web app / gateway:   http://localhost:18080
 Routing controller:  http://localhost:8001
 LLM analyzer:        http://localhost:8002
-Elasticsearch:       http://localhost:9200
 Kibana debug UI:     http://localhost:5601
 ```
 
-## Modes
+## Demo Modes
 
 ```bash
-make mode-debug     # operator endpoints/metadata visible
-make mode-attack    # attacker-facing demo, debug endpoints hidden
-make mode-normal    # normal-first adaptive flow
-make mode-honeypot  # direct endpoint-to-honeypot test mode
-make mode-show
+make mode-normal   # adaptive flow: first request real service, later requests may be routed
+make mode-attack   # attacker-facing mode: hide debug endpoints/metadata
+make mode-debug    # operator mode: enable /routes, /model/reload, detailed health
+make clear-routes  # clear old session routes before demo/test
 ```
 
-Important:
-
-- Adaptive demo chính dùng `make mode-normal`.
-- `make mode-honeypot` chỉ dùng để test honeypot contract nhanh.
-- Debug endpoints như `/routes`, `/model/reload`, OpenAPI docs chỉ dùng trong debug mode.
-
-## Logs
-
-Container logs:
-
-```bash
-make logs-gateway
-make logs-analyzer
-make logs-honeypots
-make logs-ingest
-```
-
-Host-mounted logs:
-
-```bash
-tail -f logs/llm_analyzer/llm_fields.jsonl
-tail -f logs/real_backend/service_requests.jsonl
-tail -f logs/honeypots/sqli/service_requests.jsonl
-tail -f logs/honeypots/cmdi/service_requests.jsonl
-tail -f logs/honeypots/ssti/service_requests.jsonl
-tail -f logs/honeypots/ssrf/service_requests.jsonl
-```
-
-## Route Maps
-
-```bash
-make clear-routes
-curl -s http://localhost:8001/routes | python -m json.tool
-```
-
-Manually route one session:
-
-```bash
-curl -s -X POST "http://localhost:8001/route/session/demo_sqli?backend=sqli_api" | python -m json.tool
-curl -s -X POST "http://localhost:8001/route/session/demo_ssti?backend=ssti_api" | python -m json.tool
-curl -s -X POST "http://localhost:8001/route/session/demo_cmdi?backend=cmdi_api" | python -m json.tool
-curl -s -X POST "http://localhost:8001/route/session/demo_ssrf?backend=ssrf_api" | python -m json.tool
-```
-
-## Smoke Tests
+Recommended demo setup:
 
 ```bash
 make mode-debug
 make mode-normal
 make clear-routes
-make validate PYTHON=../.venv/bin/python
-make test-adaptive-web
-make test-adaptive-attacks
-make test-rl-split-ip
 ```
 
-Expected:
-
-- `make validate`: syntax + direct honeypots + core real routes pass.
-- `make test-adaptive-attacks`: SQLi/CMDi/SSTI/SSRF route đúng honeypot, API surface khác không bị hỏng.
-- Route maps cuối test rỗng.
-
-## Manual Adaptive Test
-
-SQLi:
+Before attacker-facing presentation:
 
 ```bash
-make mode-debug
-make mode-normal
-make clear-routes
+make mode-attack
+```
 
-SID="manual_sqli_$(date +%s)"
+## Attacker-View Manual Test
+
+SQLi adaptive route:
+
+```bash
+SID="demo_sqli_$(date +%s)"
 
 curl -s -X POST http://localhost:18080/api/articles/search \
   -H "Content-Type: application/json" \
@@ -115,18 +61,18 @@ curl -s -X POST http://localhost:18080/api/articles/search \
 
 sleep 8
 
-curl -s "http://localhost:8001/route/session/${SID}" | python -m json.tool
-
 curl -i -s -X POST http://localhost:18080/api/articles/search \
   -H "Content-Type: application/json" \
   -H "Cookie: sid=${SID}" \
   -d '{"query":"union select password from users"}'
 ```
 
-SSTI markdown contract:
+Expected second response: fake SQL error from SQLi honeypot.
+
+SSTI adaptive route:
 
 ```bash
-SID="manual_ssti_$(date +%s)"
+SID="demo_ssti_$(date +%s)"
 
 curl -s -X POST http://localhost:18080/api/tools/preview \
   -H "Content-Type: application/json" \
@@ -135,146 +81,150 @@ curl -s -X POST http://localhost:18080/api/tools/preview \
 
 sleep 8
 
-curl -s "http://localhost:8001/route/session/${SID}" | python -m json.tool
-
 curl -s -X POST http://localhost:18080/api/tools/preview \
   -H "Content-Type: application/json" \
   -H "Cookie: sid=${SID}" \
   -d '{"content":"# Hello\n\nType some **Markdown** here.\n\n```python\nprint(\"hello\")\n```\n\n{{7*7}}"}' | python -m json.tool
 ```
 
-Expected SSTI output vẫn có markdown HTML và `49`.
+Expected second response: markdown HTML is still rendered and `{{7*7}}` becomes `49`.
 
-## Direct `/decide` Test
+Normal-service continuity check in same browser/session:
+
+```bash
+curl -s -X POST http://localhost:18080/api/tools/ping \
+  -H "Content-Type: application/json" \
+  -H "Cookie: sid=${SID}" \
+  -d '{"host":"8.8.8.8; id"}' | python -m json.tool
+```
+
+Expected: non-target API surface does not break because routing is endpoint-scoped.
+
+## Automated Tests
+
+```bash
+make mode-debug
+make mode-normal
+make clear-routes
+make validate PYTHON=../.venv/bin/python
+make test-adaptive-attacks PYTHON=../.venv/bin/python
+make test-adaptive-web PYTHON=../.venv/bin/python
+```
+
+Expected:
+
+- `make validate`: syntax, direct honeypots, and core real routes pass.
+- `make test-adaptive-attacks`: SQLi/CMDi/SSTI/SSRF route to matching honeypots.
+- `make test-adaptive-web`: route is endpoint-scoped; unrelated APIs stay on real service.
+
+## Operator Debug
+
+Route maps are debug-only:
+
+```bash
+make mode-debug
+curl -s http://localhost:8001/routes | python -m json.tool
+curl -s "http://localhost:8001/route/session/${SID}" | python -m json.tool
+```
+
+Reload tracked RL model:
+
+```bash
+curl -s -X POST http://localhost:8001/model/reload | python -m json.tool
+```
+
+Direct model decision smoke test:
 
 ```bash
 curl -s -X POST http://localhost:8001/decide \
   -H "Content-Type: application/json" \
-  -d '{
-    "state_schema": "web_state",
-    "protocol": "http",
-    "session_id": "direct_sqli",
-    "apply_route": false,
-    "state": [0.0,0.2,0.0,0.67,1.0,0.0,0.0,0.9,0.05,0.05,0.05,0,0,0.15,0.35,0.39]
-  }' | python -m json.tool
+  -d '{"state_schema":"web_state","protocol":"http","apply_route":false,"state":[0.0003,0.6,0.0,0.449,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.035,0.175]}' \
+  | python -m json.tool
 ```
 
-Expected: `ROUTE_SQLI -> sqli_api`.
+Expected: `KEEP_NORMAL`.
 
-## Replay Buffer
+## Logs
 
-Generate Web traffic and export replay buffer:
+Routing controller + analyzer container logs:
 
 ```bash
-make generate-replay-buffer PYTHON=../.venv/bin/python
-RL_REPLAY_SESSIONS=80 make generate-replay-buffer PYTHON=../.venv/bin/python
+make logs-analyzer
 ```
 
-Export from existing runtime logs:
+Gateway logs:
 
 ```bash
-make export-replay-buffer PYTHON=../.venv/bin/python
+make logs-gateway
 ```
 
-Inspect:
+Host-mounted analyzer decisions:
 
 ```bash
-wc -l control_plane/rl_agent/data/replay_buffer.jsonl
-head -1 control_plane/rl_agent/data/replay_buffer.jsonl | python -m json.tool
+tail -f logs/llm_analyzer/llm_fields.jsonl
 ```
 
-## RL Training
-
-PyTorch chỉ cần trong local/VM venv:
+Host-mounted service/honeypot request logs:
 
 ```bash
-../.venv/bin/python -c "import torch; print(torch.__version__)"
+tail -f logs/real_backend/service_requests.jsonl
+tail -f logs/honeypots/sqli/service_requests.jsonl
+tail -f logs/honeypots/cmdi/service_requests.jsonl
+tail -f logs/honeypots/ssti/service_requests.jsonl
+tail -f logs/honeypots/ssrf/service_requests.jsonl
 ```
 
-Generate synthetic data:
+Useful fields in `logs/llm_analyzer/llm_fields.jsonl`:
 
-```bash
-make gen-fake-data PYTHON=../.venv/bin/python
+```text
+session_id
+attack_type
+target_scores
+state
+action_name
+backend
+route_applied
+route_correct_by_semantic_label
+controller_roundtrip_ms
+event_to_decision_latency_ms
 ```
 
-Build mixed synthetic + replay training data:
-
-```bash
-make generate-replay-buffer PYTHON=../.venv/bin/python RL_REPLAY_SESSIONS=240 RL_REPLAY_SEED=20260527
-make build-training-dataset PYTHON=../.venv/bin/python RL_REPLAY_REPEAT=100
-```
-
-Short smoke train:
-
-```bash
-make gen-fake-data PYTHON=../.venv/bin/python RL_SYNTHETIC_SESSIONS=200 RL_SYNTHETIC_MIN_STEPS=3 RL_SYNTHETIC_MAX_STEPS=5
-make train-rl PYTHON=../.venv/bin/python RL_EPOCHS=5 RL_LOG_EVERY=1
-```
-
-Train from replay buffer:
-
-```bash
-make train-rl-replay PYTHON=../.venv/bin/python
-```
-
-Train from mixed dataset with strict session-grouped validation:
-
-```bash
-../.venv/bin/python -B control_plane/rl_agent/train_offline.py \
-  --dataset control_plane/rl_agent/data/mixed_train_transitions.jsonl \
-  --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
-  --algorithm cql \
-  --epochs 80 \
-  --gamma 0.0 \
-  --batch-size 512 \
-  --learning-rate 0.003 \
-  --cql-alpha 1.0 \
-  --cql-temperature 1.0 \
-  --behavior-cloning-weight 0.35 \
-  --init-policy random \
-  --target-update-period 1 \
-  --device cpu \
-  --split-strategy grouped \
-  --val-ratio 0.2 \
-  --log-every 20
-cat control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json | python -m json.tool
-```
-
-Important validation fields:
-
-- `split_summary.session_overlap_count` must be `0`.
-- `split_summary.transition_fingerprint_overlap_count` should be near `0`; investigate if it is high.
-- `validation_metrics.confusion_matrix` shows wrong route types, if any.
-- `validation_metrics.by_source` separates synthetic and replay quality.
-- `initial_validation_metrics` shows pre-training quality before gradient updates.
-- Current best uses `gamma=0.0` to avoid benign replay states drifting into honeypot routes.
-
-Reload model:
-
-```bash
-docker compose up -d --force-recreate routing_controller llm_analyzer
-curl -s -X POST http://localhost:8001/model/reload | python -m json.tool
-```
-
-## Metrics
+## Metrics Report
 
 ```bash
 make evaluate-metrics PYTHON=../.venv/bin/python
 cat logs/metrics_report.json | python -m json.tool
 ```
 
-Metrics:
+Metrics covered:
 
-- Honeypot engagement rate.
-- Avg requests after adaptive rerouting.
-- Session length.
-- Correct honeypot routing rate.
-- False rerouting rate on benign sessions.
-- Normal-service continuity rate.
+```text
+honeypot_engagement_rate
+avg_requests_after_adaptive_rerouting
+session_length_seconds
+correct_honeypot_routing_rate
+false_rerouting_rate_on_benign_sessions
+normal_service_continuity_rate
+```
 
-Nếu muốn report sạch, archive hoặc xóa `logs/**/*.jsonl`, chạy lại test/demo, rồi evaluate lại.
+For a clean report, archive or remove `logs/**/*.jsonl`, rerun the demo/tests, then run `make evaluate-metrics`.
 
-## Cleanup
+## RL Training Reference
+
+The trained runtime model is already tracked:
+
+```text
+control_plane/rl_agent/artifacts/rl_agent_linear.json
+control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json
+```
+
+Training commands, parameters, and validation report fields are in:
+
+```text
+control_plane/RL_TRAINING_SUMMARY.md
+```
+
+## Shutdown
 
 ```bash
 make clear-routes
