@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
+import hashlib
 import json
 import random
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -32,17 +34,155 @@ def split_dataset(
     transitions: Sequence[Transition],
     validation_ratio: float,
     seed: int,
-) -> Tuple[List[Transition], List[Transition]]:
-    idx = list(range(len(transitions)))
-    random.Random(seed).shuffle(idx)
+    strategy: str = "grouped",
+    group_by: str = "session_id",
+) -> Tuple[List[Transition], List[Transition], Dict[str, Any]]:
+    rng = random.Random(seed)
+    if strategy == "transition":
+        indices = list(range(len(transitions)))
+        rng.shuffle(indices)
+        split_at = int((1.0 - validation_ratio) * len(indices))
+        train_idx = indices[:split_at]
+        val_idx = indices[split_at:]
+    elif strategy == "grouped":
+        session_groups: Dict[str, List[int]] = defaultdict(list)
+        for idx, transition in enumerate(transitions):
+            group_key = transition.session_id or f"missing-session-{idx}"
+            session_groups[group_key].append(idx)
 
-    split_at = int((1.0 - validation_ratio) * len(idx))
-    train_idx = idx[:split_at]
-    val_idx = idx[split_at:]
+        stratified_groups: Dict[str, Dict[str, List[int]]] = defaultdict(dict)
+        for group_key, group_indices in session_groups.items():
+            group_transitions = [transitions[idx] for idx in group_indices]
+            source = Counter(transition.source or "unknown" for transition in group_transitions).most_common(1)[0][0]
+            attack_type = Counter(
+                transition.attack_type or "unknown" for transition in group_transitions
+            ).most_common(1)[0][0]
+            stratum = f"{source}:{attack_type}"
+            stratified_groups[stratum][group_key] = group_indices
+
+        train_idx = []
+        val_idx = []
+        for stratum in sorted(stratified_groups):
+            groups = stratified_groups[stratum]
+            group_keys = list(groups)
+            rng.shuffle(group_keys)
+
+            if len(group_keys) <= 1:
+                val_group_count = 0
+            else:
+                requested = int(round(len(group_keys) * validation_ratio))
+                val_group_count = min(len(group_keys) - 1, max(1, requested))
+
+            val_keys = set(group_keys[:val_group_count])
+            for key in group_keys:
+                if key in val_keys:
+                    val_idx.extend(groups[key])
+                else:
+                    train_idx.extend(groups[key])
+    else:
+        raise ValueError(f"Unsupported split strategy: {strategy}")
 
     train_set = [transitions[i] for i in train_idx]
     val_set = [transitions[i] for i in val_idx]
-    return train_set, val_set
+    summary = build_split_summary(
+        train_set=train_set,
+        val_set=val_set,
+        validation_ratio=validation_ratio,
+        strategy=strategy,
+        group_by=group_by,
+    )
+    return train_set, val_set, summary
+
+
+def named_action_counts(values: Iterable[int]) -> Dict[str, int]:
+    counts = Counter(int(value) for value in values if value is not None)
+    return {action_name(idx): counts.get(idx, 0) for idx in range(len(ACTIONS))}
+
+
+def summarize_dataset(transitions: Sequence[Transition]) -> Dict[str, Any]:
+    sessions = {transition.session_id for transition in transitions if transition.session_id}
+    sessions_by_source: Dict[str, set[str]] = defaultdict(set)
+    for transition in transitions:
+        if transition.session_id:
+            sessions_by_source[transition.source or "unknown"].add(transition.session_id)
+
+    return {
+        "transitions": len(transitions),
+        "sessions": len(sessions),
+        "missing_session_transitions": sum(1 for transition in transitions if not transition.session_id),
+        "source_counts": dict(sorted(Counter(transition.source or "unknown" for transition in transitions).items())),
+        "source_session_counts": {source: len(session_ids) for source, session_ids in sorted(sessions_by_source.items())},
+        "attack_type_counts": dict(sorted(Counter(transition.attack_type or "unknown" for transition in transitions).items())),
+        "stratum_counts": dict(sorted(
+            Counter(
+                f"{transition.source or 'unknown'}:{transition.attack_type or 'unknown'}"
+                for transition in transitions
+            ).items()
+        )),
+        "action_counts": named_action_counts(transition.action for transition in transitions),
+        "optimal_action_counts": named_action_counts(
+            transition.optimal_action for transition in transitions if transition.optimal_action is not None
+        ),
+    }
+
+
+def transition_fingerprint(transition: Transition) -> str:
+    payload = {
+        "state": transition.state,
+        "action": transition.action,
+        "reward": round(float(transition.reward), 6),
+        "next_state": transition.next_state,
+        "done": transition.done,
+        "optimal_action": transition.optimal_action,
+        "protocol": transition.protocol,
+    }
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def fingerprint_stats(transitions: Sequence[Transition]) -> Dict[str, int]:
+    counts = Counter(transition_fingerprint(transition) for transition in transitions)
+    duplicate_rows = sum(count - 1 for count in counts.values() if count > 1)
+    return {
+        "rows": len(transitions),
+        "unique_fingerprints": len(counts),
+        "duplicate_rows": duplicate_rows,
+        "max_duplicate_count": max(counts.values()) if counts else 0,
+    }
+
+
+def build_split_summary(
+    *,
+    train_set: Sequence[Transition],
+    val_set: Sequence[Transition],
+    validation_ratio: float,
+    strategy: str,
+    group_by: str,
+) -> Dict[str, Any]:
+    train_sessions = {transition.session_id for transition in train_set if transition.session_id}
+    val_sessions = {transition.session_id for transition in val_set if transition.session_id}
+    session_overlap = sorted(train_sessions & val_sessions)
+
+    train_fingerprints = {transition_fingerprint(transition) for transition in train_set}
+    val_fingerprints = {transition_fingerprint(transition) for transition in val_set}
+    fingerprint_overlap = train_fingerprints & val_fingerprints
+
+    return {
+        "strategy": strategy,
+        "group_by": group_by,
+        "validation_ratio": validation_ratio,
+        "train": summarize_dataset(train_set),
+        "validation": summarize_dataset(val_set),
+        "train_fingerprint_stats": fingerprint_stats(train_set),
+        "validation_fingerprint_stats": fingerprint_stats(val_set),
+        "session_overlap_count": len(session_overlap),
+        "session_overlap_sample": session_overlap[:10],
+        "transition_fingerprint_overlap_count": len(fingerprint_overlap),
+        "transition_fingerprint_overlap_rate": (
+            len(fingerprint_overlap) / float(max(1, min(len(train_fingerprints), len(val_fingerprints))))
+        ),
+        "transition_fingerprint_overlap_sample": sorted(fingerprint_overlap)[:10],
+    }
 
 
 def proxy_reward(pred_action: int, optimal_action: int) -> float:
@@ -109,13 +249,86 @@ def conservative_q_regularizer(
     return (conservative_value - q_selected).mean()
 
 
-def evaluate(model: nn.Module, transitions: Sequence[Transition], device: torch.device) -> Dict[str, float]:
-    if not transitions:
+def summarize_prediction_records(
+    records: Sequence[Tuple[int, int, float]],
+    *,
+    include_confusion: bool = True,
+) -> Dict[str, Any]:
+    if not records:
         return {
             "accuracy": 0.0,
             "avg_proxy_reward": 0.0,
             "samples": 0,
+            "macro_f1": 0.0,
+            "weighted_f1": 0.0,
+            "balanced_accuracy": 0.0,
         }
+
+    total = len(records)
+    correct = sum(1 for actual, predicted, _ in records if actual == predicted)
+    reward_sum = sum(reward for _, _, reward in records)
+
+    confusion = [[0 for _ in ACTIONS] for _ in ACTIONS]
+    for actual, predicted, _ in records:
+        if 0 <= actual < len(ACTIONS) and 0 <= predicted < len(ACTIONS):
+            confusion[actual][predicted] += 1
+
+    per_action: Dict[str, Dict[str, float]] = {}
+    f1_values = []
+    weighted_f1_sum = 0.0
+    recall_values = []
+    for idx in range(len(ACTIONS)):
+        true_positive = confusion[idx][idx]
+        support = sum(confusion[idx])
+        predicted_count = sum(confusion[row][idx] for row in range(len(ACTIONS)))
+        precision = true_positive / predicted_count if predicted_count else 0.0
+        recall = true_positive / support if support else 0.0
+        f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+
+        if support:
+            f1_values.append(f1)
+            recall_values.append(recall)
+            weighted_f1_sum += f1 * support
+
+        per_action[action_name(idx)] = {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "support": support,
+            "predicted": predicted_count,
+        }
+
+    result: Dict[str, Any] = {
+        "accuracy": correct / float(total),
+        "avg_proxy_reward": reward_sum / float(total),
+        "samples": total,
+        "macro_f1": sum(f1_values) / float(len(f1_values)) if f1_values else 0.0,
+        "weighted_f1": weighted_f1_sum / float(total),
+        "balanced_accuracy": sum(recall_values) / float(len(recall_values)) if recall_values else 0.0,
+        "actual_action_counts": {
+            action_name(idx): sum(confusion[idx]) for idx in range(len(ACTIONS))
+        },
+        "predicted_action_counts": {
+            action_name(idx): sum(confusion[row][idx] for row in range(len(ACTIONS))) for idx in range(len(ACTIONS))
+        },
+        "per_action": per_action,
+    }
+    if include_confusion:
+        result["confusion_matrix"] = {
+            action_name(row): {
+                action_name(col): confusion[row][col] for col in range(len(ACTIONS))
+            }
+            for row in range(len(ACTIONS))
+        }
+    return result
+
+
+def evaluate(model: nn.Module, transitions: Sequence[Transition], device: torch.device) -> Dict[str, Any]:
+    if not transitions:
+        result = summarize_prediction_records([])
+        result["by_source"] = {}
+        result["by_attack_type"] = {}
+        return result
 
     with torch.no_grad():
         tensors = to_tensors(transitions, device)
@@ -123,30 +336,40 @@ def evaluate(model: nn.Module, transitions: Sequence[Transition], device: torch.
         masked_q = q_values.masked_fill(~tensors["current_mask"], -1e9)
         predicted = masked_q.argmax(dim=1).detach().cpu().tolist()
 
-    correct = 0
-    total = 0
-    reward_sum = 0.0
+    records: List[Tuple[int, int, float]] = []
+    records_by_source: Dict[str, List[Tuple[int, int, float]]] = defaultdict(list)
+    records_by_attack_type: Dict[str, List[Tuple[int, int, float]]] = defaultdict(list)
 
     for idx, transition in enumerate(transitions):
         if transition.optimal_action is None:
             continue
         pred_action = int(predicted[idx])
-        total += 1
-        if pred_action == transition.optimal_action:
-            correct += 1
-        reward_sum += proxy_reward(pred_action, transition.optimal_action)
+        optimal_action = int(transition.optimal_action)
+        record = (optimal_action, pred_action, proxy_reward(pred_action, optimal_action))
+        records.append(record)
+        records_by_source[transition.source or "unknown"].append(record)
+        records_by_attack_type[transition.attack_type or "unknown"].append(record)
 
-    if total == 0:
-        return {
-            "accuracy": 0.0,
-            "avg_proxy_reward": 0.0,
-            "samples": 0,
-        }
+    result = summarize_prediction_records(records)
+    result["by_source"] = {
+        source: summarize_prediction_records(group_records, include_confusion=False)
+        for source, group_records in sorted(records_by_source.items())
+    }
+    result["by_attack_type"] = {
+        attack_type: summarize_prediction_records(group_records, include_confusion=False)
+        for attack_type, group_records in sorted(records_by_attack_type.items())
+    }
+    return result
 
+
+def compact_metrics(metrics: Dict[str, Any]) -> Dict[str, float | int]:
     return {
-        "accuracy": correct / float(total),
-        "avg_proxy_reward": reward_sum / float(total),
-        "samples": float(total),
+        "accuracy": float(metrics["accuracy"]),
+        "macro_f1": float(metrics["macro_f1"]),
+        "weighted_f1": float(metrics["weighted_f1"]),
+        "balanced_accuracy": float(metrics["balanced_accuracy"]),
+        "avg_proxy_reward": float(metrics["avg_proxy_reward"]),
+        "samples": int(metrics["samples"]),
     }
 
 
@@ -188,6 +411,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-update-period", type=int, default=1, help="Epochs between target-network syncs.")
     parser.add_argument("--batch-size", type=int, default=256, help="Batch size for training.")
     parser.add_argument("--val-ratio", type=float, default=0.2, help="Validation split ratio.")
+    parser.add_argument(
+        "--split-strategy",
+        choices=("grouped", "transition"),
+        default="grouped",
+        help=(
+            "Validation split strategy. grouped keeps whole sessions in either train or validation "
+            "and stratifies by source plus dominant attack type; transition is the older random transition split."
+        ),
+    )
+    parser.add_argument(
+        "--group-by",
+        choices=("session_id",),
+        default="session_id",
+        help="Grouping key for grouped validation split.",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--device", type=str, default="cpu", help="Torch device (default: cpu).")
     parser.add_argument(
@@ -270,7 +508,27 @@ def main() -> None:
     if not transitions:
         raise RuntimeError(f"No transitions loaded from: {args.dataset}")
 
-    train_set, val_set = split_dataset(transitions, args.val_ratio, args.seed)
+    train_set, val_set, split_summary = split_dataset(
+        transitions,
+        args.val_ratio,
+        args.seed,
+        strategy=args.split_strategy,
+        group_by=args.group_by,
+    )
+    if not train_set:
+        raise RuntimeError("Training split is empty; lower --val-ratio or provide more sessions.")
+    if not val_set:
+        raise RuntimeError("Validation split is empty; provide more sessions or use --split-strategy transition.")
+    if args.split_strategy == "grouped" and split_summary["session_overlap_count"]:
+        raise RuntimeError(
+            "Strict validation failed: session IDs exist in both train and validation. "
+            f"Examples: {split_summary['session_overlap_sample']}"
+        )
+    if args.split_strategy != "grouped" and split_summary["session_overlap_count"]:
+        print(
+            "WARNING: validation contains session overlap because --split-strategy transition was used. "
+            "Use --split-strategy grouped for report-grade validation."
+        )
 
     model = build_model(args.seed, device, args.init_policy)
     target_model = build_model(args.seed, device, args.init_policy)
@@ -279,15 +537,25 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.l2)
 
     train_tensors = to_tensors(train_set, device)
+    initial_train = evaluate(model, train_set, device)
+    initial_val = evaluate(model, val_set, device)
+    epoch_history: List[Dict[str, Any]] = []
 
     print("Offline training started")
     print(f"- Dataset: {args.dataset}")
     print(f"- Device: {device}")
     print(f"- Algorithm: {args.algorithm}")
     print(f"- Init policy: {args.init_policy}")
+    print(f"- Split strategy: {args.split_strategy} by {args.group_by}")
     print(f"- Total transitions: {len(transitions)}")
     print(f"- Train transitions: {len(train_set)}")
     print(f"- Validation transitions: {len(val_set)}")
+    print(f"- Train sessions: {split_summary['train']['sessions']}")
+    print(f"- Validation sessions: {split_summary['validation']['sessions']}")
+    print(f"- Session overlap: {split_summary['session_overlap_count']}")
+    print(f"- Transition fingerprint overlap: {split_summary['transition_fingerprint_overlap_count']}")
+    print(f"- Initial train accuracy: {initial_train['accuracy']:.3f}")
+    print(f"- Initial validation accuracy: {initial_val['accuracy']:.3f}")
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -360,6 +628,15 @@ def main() -> None:
         if should_log:
             train_metrics = evaluate(model, train_set, device)
             val_metrics = evaluate(model, val_set, device)
+            epoch_history.append({
+                "epoch": epoch,
+                "loss": mse,
+                "td_mse": td_mse,
+                "cql_penalty": cql_penalty,
+                "behavior_cloning_loss": bc_penalty,
+                "train": compact_metrics(train_metrics),
+                "validation": compact_metrics(val_metrics),
+            })
             print(
                 "Epoch"
                 f" {epoch:03d}"
@@ -379,9 +656,11 @@ def main() -> None:
         "cql_temperature": args.cql_temperature,
         "behavior_cloning_weight": args.behavior_cloning_weight,
         "init_policy": args.init_policy,
-        "target_update_period": args.target_update_period,
-        "dataset": str(args.dataset),
-    }
+                "target_update_period": args.target_update_period,
+                "dataset": str(args.dataset),
+                "split_strategy": args.split_strategy,
+                "group_by": args.group_by,
+            }
     export_model_json(model, args.output, training_metadata)
 
     final_train = evaluate(model, train_set, device)
@@ -404,9 +683,27 @@ def main() -> None:
                 "init_policy": args.init_policy,
                 "target_update_period": args.target_update_period,
                 "batch_size": args.batch_size,
+                "split_strategy": args.split_strategy,
+                "group_by": args.group_by,
                 "device": str(device),
+                "dataset_summary": summarize_dataset(transitions),
+                "split_summary": split_summary,
+                "initial_train_metrics": initial_train,
+                "initial_validation_metrics": initial_val,
+                "epoch_history": epoch_history,
                 "train_metrics": final_train,
                 "validation_metrics": final_val,
+                "generalization": {
+                    "accuracy_gap_train_minus_validation": final_train["accuracy"] - final_val["accuracy"],
+                    "macro_f1_gap_train_minus_validation": final_train["macro_f1"] - final_val["macro_f1"],
+                    "weighted_f1_gap_train_minus_validation": final_train["weighted_f1"] - final_val["weighted_f1"],
+                    "overfit_warning_accuracy_gap_gt_0_05": (
+                        final_train["accuracy"] - final_val["accuracy"] > 0.05
+                    ),
+                    "overfit_warning_macro_f1_gap_gt_0_05": (
+                        final_train["macro_f1"] - final_val["macro_f1"] > 0.05
+                    ),
+                },
             },
             f,
             indent=2,
@@ -417,6 +714,8 @@ def main() -> None:
     print(f"- Metrics saved: {metrics_path}")
     print(f"- Final train accuracy: {final_train['accuracy']:.3f}")
     print(f"- Final validation accuracy: {final_val['accuracy']:.3f}")
+    print(f"- Final validation macro F1: {final_val['macro_f1']:.3f}")
+    print(f"- Generalization accuracy gap: {final_train['accuracy'] - final_val['accuracy']:.3f}")
 
     sample = random.choice(val_set if val_set else train_set)
     model.eval()

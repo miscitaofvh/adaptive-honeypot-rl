@@ -197,6 +197,13 @@ Generate synthetic data:
 make gen-fake-data PYTHON=../.venv/bin/python
 ```
 
+Build mixed synthetic + replay training data:
+
+```bash
+make generate-replay-buffer PYTHON=../.venv/bin/python
+make build-training-dataset PYTHON=../.venv/bin/python RL_REPLAY_REPEAT=250
+```
+
 Short smoke train:
 
 ```bash
@@ -209,6 +216,21 @@ Train from replay buffer:
 ```bash
 make train-rl-replay PYTHON=../.venv/bin/python
 ```
+
+Train from mixed dataset with strict session-grouped validation:
+
+```bash
+make train-rl-mixed PYTHON=../.venv/bin/python RL_EPOCHS=40 RL_BATCH_SIZE=512
+cat control_plane/rl_agent/artifacts/rl_agent_linear.metrics.json | python -m json.tool
+```
+
+Important validation fields:
+
+- `split_summary.session_overlap_count` must be `0`.
+- `split_summary.transition_fingerprint_overlap_count` should be near `0`; investigate if it is high.
+- `validation_metrics.confusion_matrix` shows wrong route types, if any.
+- `validation_metrics.by_source` separates synthetic and replay quality.
+- `initial_validation_metrics` shows how much the seeded `web_prior` already solved before training.
 
 Reload model:
 

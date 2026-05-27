@@ -58,6 +58,10 @@ class Transition:
     done: bool
     protocol: str = "http"
     optimal_action: Optional[int] = None
+    session_id: str = ""
+    step: Optional[int] = None
+    attack_type: str = ""
+    source: str = "unknown"
 
 
 def clip(value: float, lower: float, upper: float) -> float:
@@ -83,6 +87,30 @@ def action_name(action_idx: int) -> str:
 
 def action_backend(action_idx: int) -> str:
     return ACTION_TO_BACKEND.get(action_idx, "normal_api")
+
+
+def infer_transition_source(raw: Dict[str, object], session_id: str) -> str:
+    source = str(raw.get("source") or "").strip().lower()
+    if source:
+        return source
+    if raw.get("decision_id") or raw.get("reward_components"):
+        return "replay"
+    if session_id.startswith("replay_"):
+        return "replay"
+    if session_id.startswith("session_"):
+        return "synthetic"
+    return "unknown"
+
+
+def infer_attack_type(raw: Dict[str, object], session_id: str) -> str:
+    attack_type = str(raw.get("attack_type") or raw.get("kind") or "").strip().lower()
+    if attack_type:
+        return attack_type
+    session_lower = session_id.lower()
+    for candidate in ("sqli", "ssti", "cmdi", "ssrf", "benign"):
+        if candidate in session_lower:
+            return candidate
+    return ""
 
 
 class LinearQAgent:
@@ -233,9 +261,12 @@ def parse_transition(raw: Dict[str, object]) -> Transition:
     next_state = validate_state(raw["next_state"])
 
     protocol = str(raw.get("protocol") or protocol_from_state(state)).lower()
+    session_id = str(raw.get("session_id") or "").strip()
     optimal_action = raw.get("optimal_action")
     if optimal_action is not None:
         optimal_action = int(optimal_action)
+    step_raw = raw.get("step")
+    step = int(step_raw) if step_raw is not None else None
 
     return Transition(
         state=state,
@@ -245,6 +276,10 @@ def parse_transition(raw: Dict[str, object]) -> Transition:
         done=bool(raw["done"]),
         protocol=protocol,
         optimal_action=optimal_action,
+        session_id=session_id,
+        step=step,
+        attack_type=infer_attack_type(raw, session_id),
+        source=infer_transition_source(raw, session_id),
     )
 
 

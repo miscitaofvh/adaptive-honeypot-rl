@@ -1,0 +1,2606 @@
+{
+  "dataset": "control_plane/rl_agent/data/mixed_train_transitions.jsonl",
+  "model": "control_plane/rl_agent/artifacts/vm_tune_gamma_20260527_145952/random_cql_gamma0_alpha1_bc035.json",
+  "algorithm": "cql",
+  "epochs": 80,
+  "gamma": 0.0,
+  "learning_rate": 0.003,
+  "l2": 0.0005,
+  "cql_alpha": 1.0,
+  "cql_temperature": 1.0,
+  "behavior_cloning_weight": 0.35,
+  "init_policy": "random",
+  "target_update_period": 1,
+  "batch_size": 512,
+  "split_strategy": "grouped",
+  "group_by": "session_id",
+  "device": "cpu",
+  "dataset_summary": {
+    "transitions": 243417,
+    "sessions": 20240,
+    "missing_session_transitions": 0,
+    "source_counts": {
+      "replay": 43300,
+      "synthetic": 200117
+    },
+    "source_session_counts": {
+      "replay": 240,
+      "synthetic": 20000
+    },
+    "attack_type_counts": {
+      "benign": 80782,
+      "cmdi": 39383,
+      "malformed": 10121,
+      "sqli": 42795,
+      "ssrf": 32523,
+      "ssti": 37813
+    },
+    "stratum_counts": {
+      "replay:benign": 4800,
+      "replay:cmdi": 9600,
+      "replay:sqli": 10600,
+      "replay:ssrf": 8700,
+      "replay:ssti": 9600,
+      "synthetic:benign": 75982,
+      "synthetic:cmdi": 29783,
+      "synthetic:malformed": 10121,
+      "synthetic:sqli": 32195,
+      "synthetic:ssrf": 23823,
+      "synthetic:ssti": 28213
+    },
+    "action_counts": {
+      "KEEP_NORMAL": 104867,
+      "ROUTE_SQLI": 37432,
+      "ROUTE_SSTI": 35187,
+      "ROUTE_CMDI": 35459,
+      "ROUTE_SSRF": 30472
+    },
+    "optimal_action_counts": {
+      "KEEP_NORMAL": 91003,
+      "ROUTE_SQLI": 42795,
+      "ROUTE_SSTI": 37813,
+      "ROUTE_CMDI": 39383,
+      "ROUTE_SSRF": 32423
+    }
+  },
+  "split_summary": {
+    "strategy": "grouped",
+    "group_by": "session_id",
+    "validation_ratio": 0.2,
+    "train": {
+      "transitions": 194313,
+      "sessions": 16190,
+      "missing_session_transitions": 0,
+      "source_counts": {
+        "replay": 34300,
+        "synthetic": 160013
+      },
+      "source_session_counts": {
+        "replay": 190,
+        "synthetic": 16000
+      },
+      "attack_type_counts": {
+        "benign": 64552,
+        "cmdi": 31433,
+        "malformed": 8142,
+        "sqli": 34045,
+        "ssrf": 26030,
+        "ssti": 30111
+      },
+      "stratum_counts": {
+        "replay:benign": 3800,
+        "replay:cmdi": 7600,
+        "replay:sqli": 8400,
+        "replay:ssrf": 6900,
+        "replay:ssti": 7600,
+        "synthetic:benign": 60752,
+        "synthetic:cmdi": 23833,
+        "synthetic:malformed": 8142,
+        "synthetic:sqli": 25645,
+        "synthetic:ssrf": 19130,
+        "synthetic:ssti": 22511
+      },
+      "action_counts": {
+        "KEEP_NORMAL": 83522,
+        "ROUTE_SQLI": 29931,
+        "ROUTE_SSTI": 28167,
+        "ROUTE_CMDI": 28153,
+        "ROUTE_SSRF": 24540
+      },
+      "optimal_action_counts": {
+        "KEEP_NORMAL": 72794,
+        "ROUTE_SQLI": 34045,
+        "ROUTE_SSTI": 30111,
+        "ROUTE_CMDI": 31433,
+        "ROUTE_SSRF": 25930
+      }
+    },
+    "validation": {
+      "transitions": 49104,
+      "sessions": 4050,
+      "missing_session_transitions": 0,
+      "source_counts": {
+        "replay": 9000,
+        "synthetic": 40104
+      },
+      "source_session_counts": {
+        "replay": 50,
+        "synthetic": 4000
+      },
+      "attack_type_counts": {
+        "benign": 16230,
+        "cmdi": 7950,
+        "malformed": 1979,
+        "sqli": 8750,
+        "ssrf": 6493,
+        "ssti": 7702
+      },
+      "stratum_counts": {
+        "replay:benign": 1000,
+        "replay:cmdi": 2000,
+        "replay:sqli": 2200,
+        "replay:ssrf": 1800,
+        "replay:ssti": 2000,
+        "synthetic:benign": 15230,
+        "synthetic:cmdi": 5950,
+        "synthetic:malformed": 1979,
+        "synthetic:sqli": 6550,
+        "synthetic:ssrf": 4693,
+        "synthetic:ssti": 5702
+      },
+      "action_counts": {
+        "KEEP_NORMAL": 21345,
+        "ROUTE_SQLI": 7501,
+        "ROUTE_SSTI": 7020,
+        "ROUTE_CMDI": 7306,
+        "ROUTE_SSRF": 5932
+      },
+      "optimal_action_counts": {
+        "KEEP_NORMAL": 18209,
+        "ROUTE_SQLI": 8750,
+        "ROUTE_SSTI": 7702,
+        "ROUTE_CMDI": 7950,
+        "ROUTE_SSRF": 6493
+      }
+    },
+    "train_fingerprint_stats": {
+      "rows": 194313,
+      "unique_fingerprints": 160322,
+      "duplicate_rows": 33991,
+      "max_duplicate_count": 1200
+    },
+    "validation_fingerprint_stats": {
+      "rows": 49104,
+      "unique_fingerprints": 40191,
+      "duplicate_rows": 8913,
+      "max_duplicate_count": 200
+    },
+    "session_overlap_count": 0,
+    "session_overlap_sample": [],
+    "transition_fingerprint_overlap_count": 9,
+    "transition_fingerprint_overlap_rate": 0.00022393073076061804,
+    "transition_fingerprint_overlap_sample": [
+      "0b32b82814e6ad3b6ba4ba6b4cd748217f7193f1e082b30e1e9dc325d42e1f42",
+      "2cb6c3849c3e1f69813940470cfad36113345c6b86816c902a76d2c1da45408c",
+      "4666ac1acc9e61dbc7d9fba0b65da305e8b8f65af8cc9cabedce7d6388f11d27",
+      "4b0ad8dd89d34f2befa91061e56f81a00c3cafc9582d5f877b1cc2f408991e11",
+      "9d7e4482ddc457e50196c8514ad91bf76a1b2459315cda2f76b3b69679c0dcd5",
+      "9fdf78f0c75291064b5f27e739a96026b0653941567ef4ce26fde8540ed6785b",
+      "a094d68234e7ee8853752abdf32b00f54a6be7030ddf71d29fa80e333943dc65",
+      "b1b0f194683001da9c56cd0a9b976bd1164804d72c62633f49b51f94fa41e161",
+      "fb28e91c5b8b3f39f67799057c20830492d7d635e77cfdb1add91774a9bf4fed"
+    ]
+  },
+  "initial_train_metrics": {
+    "accuracy": 0.14927462393149196,
+    "avg_proxy_reward": -0.7612663589157699,
+    "samples": 194313,
+    "macro_f1": 0.06426355663995728,
+    "weighted_f1": 0.04979738746609323,
+    "balanced_accuracy": 0.1926565949103592,
+    "actual_action_counts": {
+      "KEEP_NORMAL": 72794,
+      "ROUTE_SQLI": 34045,
+      "ROUTE_SSTI": 30111,
+      "ROUTE_CMDI": 31433,
+      "ROUTE_SSRF": 25930
+    },
+    "predicted_action_counts": {
+      "KEEP_NORMAL": 6250,
+      "ROUTE_SQLI": 0,
+      "ROUTE_SSTI": 150441,
+      "ROUTE_CMDI": 0,
+      "ROUTE_SSRF": 37622
+    },
+    "per_action": {
+      "KEEP_NORMAL": {
+        "precision": 0.00016,
+        "recall": 1.3737395939225761e-05,
+        "f1": 2.5302363240726688e-05,
+        "support": 72794,
+        "predicted": 6250
+      },
+      "ROUTE_SQLI": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 34045,
+        "predicted": 0
+      },
+      "ROUTE_SSTI": {
+        "precision": 0.1927998351513218,
+        "recall": 0.9632692371558567,
+        "f1": 0.3212924808365457,
+        "support": 30111,
+        "predicted": 150441
+      },
+      "ROUTE_CMDI": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 31433,
+        "predicted": 0
+      },
+      "ROUTE_SSRF": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 25930,
+        "predicted": 37622
+      }
+    },
+    "confusion_matrix": {
+      "KEEP_NORMAL": {
+        "KEEP_NORMAL": 1,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 62121,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 10672
+      },
+      "ROUTE_SQLI": {
+        "KEEP_NORMAL": 2567,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 19031,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 12447
+      },
+      "ROUTE_SSTI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 29005,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 1106
+      },
+      "ROUTE_CMDI": {
+        "KEEP_NORMAL": 820,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 17216,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 13397
+      },
+      "ROUTE_SSRF": {
+        "KEEP_NORMAL": 2862,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 23068,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      }
+    },
+    "by_source": {
+      "replay": {
+        "accuracy": 0.22157434402332363,
+        "avg_proxy_reward": -0.5409620991253644,
+        "samples": 34300,
+        "macro_f1": 0.08994082840236686,
+        "weighted_f1": 0.09964290027084374,
+        "balanced_accuracy": 0.2,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 3900,
+          "ROUTE_SQLI": 8400,
+          "ROUTE_SSTI": 7600,
+          "ROUTE_CMDI": 7600,
+          "ROUTE_SSRF": 6800
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 26200,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 8100
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 3900,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 8400,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.2900763358778626,
+            "recall": 1.0,
+            "f1": 0.4497041420118343,
+            "support": 7600,
+            "predicted": 26200
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 7600,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 6800,
+            "predicted": 8100
+          }
+        }
+      },
+      "synthetic": {
+        "accuracy": 0.13377663064875978,
+        "avg_proxy_reward": -0.808490247667377,
+        "samples": 160013,
+        "macro_f1": 0.05834865063149112,
+        "weighted_f1": 0.041050832629653713,
+        "balanced_accuracy": 0.1901765958716896,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 68894,
+          "ROUTE_SQLI": 25645,
+          "ROUTE_SSTI": 22511,
+          "ROUTE_CMDI": 23833,
+          "ROUTE_SSRF": 19130
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 6250,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 124241,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 29522
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.00016,
+            "recall": 1.4515052109037072e-05,
+            "f1": 2.6615564782284683e-05,
+            "support": 68894,
+            "predicted": 6250
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 25645,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.1722861213287079,
+            "recall": 0.9508684643063391,
+            "f1": 0.2917166375926733,
+            "support": 22511,
+            "predicted": 124241
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 23833,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 19130,
+            "predicted": 29522
+          }
+        }
+      }
+    },
+    "by_attack_type": {
+      "benign": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.25,
+        "samples": 64552,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 64552,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 57337,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 7215
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 64552,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 57337
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 7215
+          }
+        }
+      },
+      "cmdi": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.19217383005122,
+        "samples": 31433,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 31433,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 820,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 17216,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 13397
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 820
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 17216
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 31433,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 13397
+          }
+        }
+      },
+      "malformed": {
+        "accuracy": 0.00012281994595922377,
+        "avg_proxy_reward": -1.2497973470891672,
+        "samples": 8142,
+        "macro_f1": 0.00024560972614515533,
+        "weighted_f1": 0.00024560972614515533,
+        "balanced_accuracy": 0.00012281994595922377,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 8142,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 1,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 4684,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 3457
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 0.00012281994595922377,
+            "f1": 0.00024560972614515533,
+            "support": 8142,
+            "predicted": 1
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 4684
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 3457
+          }
+        }
+      },
+      "sqli": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.1773799383169334,
+        "samples": 34045,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 34045,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 2567,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 19031,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 12447
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 2567
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 34045,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 19031
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 12447
+          }
+        }
+      },
+      "ssrf": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.1672070687668075,
+        "samples": 26030,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 100,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 25930
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 2862,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 23168,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 100,
+            "predicted": 2862
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 23168
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 25930,
+            "predicted": 0
+          }
+        }
+      },
+      "ssti": {
+        "accuracy": 0.9632692371558567,
+        "avg_proxy_reward": 1.68980771146757,
+        "samples": 30111,
+        "macro_f1": 0.9812910210433724,
+        "weighted_f1": 0.9812910210433724,
+        "balanced_accuracy": 0.9632692371558567,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 30111,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 29005,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 1106
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 0.9632692371558567,
+            "f1": 0.9812910210433724,
+            "support": 30111,
+            "predicted": 29005
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 1106
+          }
+        }
+      }
+    }
+  },
+  "initial_validation_metrics": {
+    "accuracy": 0.15070055392636036,
+    "avg_proxy_reward": -0.7566827549690454,
+    "samples": 49104,
+    "macro_f1": 0.06478725267028543,
+    "weighted_f1": 0.050809650951708446,
+    "balanced_accuracy": 0.192157881069852,
+    "actual_action_counts": {
+      "KEEP_NORMAL": 18209,
+      "ROUTE_SQLI": 8750,
+      "ROUTE_SSTI": 7702,
+      "ROUTE_CMDI": 7950,
+      "ROUTE_SSRF": 6493
+    },
+    "predicted_action_counts": {
+      "KEEP_NORMAL": 1597,
+      "ROUTE_SQLI": 0,
+      "ROUTE_SSTI": 37986,
+      "ROUTE_CMDI": 0,
+      "ROUTE_SSRF": 9521
+    },
+    "per_action": {
+      "KEEP_NORMAL": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 18209,
+        "predicted": 1597
+      },
+      "ROUTE_SQLI": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 8750,
+        "predicted": 0
+      },
+      "ROUTE_SSTI": {
+        "precision": 0.19480861369978414,
+        "recall": 0.9607894053492599,
+        "f1": 0.3239362633514271,
+        "support": 7702,
+        "predicted": 37986
+      },
+      "ROUTE_CMDI": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 7950,
+        "predicted": 0
+      },
+      "ROUTE_SSRF": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 6493,
+        "predicted": 9521
+      }
+    },
+    "confusion_matrix": {
+      "KEEP_NORMAL": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 15599,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 2610
+      },
+      "ROUTE_SQLI": {
+        "KEEP_NORMAL": 669,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 4799,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 3282
+      },
+      "ROUTE_SSTI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 7400,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 302
+      },
+      "ROUTE_CMDI": {
+        "KEEP_NORMAL": 180,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 4443,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 3327
+      },
+      "ROUTE_SSRF": {
+        "KEEP_NORMAL": 748,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 5745,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      }
+    },
+    "by_source": {
+      "replay": {
+        "accuracy": 0.2222222222222222,
+        "avg_proxy_reward": -0.5388888888888889,
+        "samples": 9000,
+        "macro_f1": 0.08988764044943821,
+        "weighted_f1": 0.09987515605493134,
+        "balanced_accuracy": 0.2,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 1000,
+          "ROUTE_SQLI": 2200,
+          "ROUTE_SSTI": 2000,
+          "ROUTE_CMDI": 2000,
+          "ROUTE_SSRF": 1800
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 6900,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 2100
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1000,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 2200,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.2898550724637681,
+            "recall": 1.0,
+            "f1": 0.44943820224719105,
+            "support": 2000,
+            "predicted": 6900
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 2000,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1800,
+            "predicted": 2100
+          }
+        }
+      },
+      "synthetic": {
+        "accuracy": 0.13464991023339318,
+        "avg_proxy_reward": -0.8055592958308397,
+        "samples": 40104,
+        "macro_f1": 0.05871479830379471,
+        "weighted_f1": 0.041740447327976944,
+        "balanced_accuracy": 0.18940722553490003,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 17209,
+          "ROUTE_SQLI": 6550,
+          "ROUTE_SSTI": 5702,
+          "ROUTE_CMDI": 5950,
+          "ROUTE_SSRF": 4693
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 1597,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 31086,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 7421
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 17209,
+            "predicted": 1597
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 6550,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.17371163867979156,
+            "recall": 0.9470361276745002,
+            "f1": 0.29357399151897356,
+            "support": 5702,
+            "predicted": 31086
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 5950,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 4693,
+            "predicted": 7421
+          }
+        }
+      }
+    },
+    "by_attack_type": {
+      "benign": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.25,
+        "samples": 16230,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 16230,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 14451,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 1779
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 16230,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 14451
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 1779
+          }
+        }
+      },
+      "cmdi": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.1932075471698114,
+        "samples": 7950,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 7950,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 180,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 4443,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 3327
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 180
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 4443
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 7950,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 3327
+          }
+        }
+      },
+      "malformed": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.25,
+        "samples": 1979,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 1979,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 1148,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 831
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1979,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 1148
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 831
+          }
+        }
+      },
+      "sqli": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.177062857142857,
+        "samples": 8750,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 8750,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 669,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 4799,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 3282
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 669
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 8750,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 4799
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 3282
+          }
+        }
+      },
+      "ssrf": {
+        "accuracy": 0.0,
+        "avg_proxy_reward": -1.165439704296935,
+        "samples": 6493,
+        "macro_f1": 0.0,
+        "weighted_f1": 0.0,
+        "balanced_accuracy": 0.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 6493
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 748,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 5745,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 748
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 5745
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 6493,
+            "predicted": 0
+          }
+        }
+      },
+      "ssti": {
+        "accuracy": 0.9607894053492599,
+        "avg_proxy_reward": 1.6823682160477798,
+        "samples": 7702,
+        "macro_f1": 0.9800026486558071,
+        "weighted_f1": 0.9800026486558071,
+        "balanced_accuracy": 0.9607894053492599,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 7702,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 7400,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 302
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 0.9607894053492599,
+            "f1": 0.9800026486558071,
+            "support": 7702,
+            "predicted": 7400
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 302
+          }
+        }
+      }
+    }
+  },
+  "epoch_history": [
+    {
+      "epoch": 1,
+      "loss": 2.5059745189271974,
+      "td_mse": 0.7141859627394002,
+      "cql_penalty": 1.3272507857575269,
+      "behavior_cloning_loss": 1.3272507898409236,
+      "train": {
+        "accuracy": 0.9610267969718959,
+        "macro_f1": 0.9639551668942442,
+        "weighted_f1": 0.9609900844275575,
+        "balanced_accuracy": 0.9786967806632478,
+        "avg_proxy_reward": 1.2106825070890779,
+        "samples": 194313
+      },
+      "validation": {
+        "accuracy": 0.9629765395894428,
+        "macro_f1": 0.9656374119758219,
+        "weighted_f1": 0.962946538935602,
+        "balanced_accuracy": 0.9800318523806908,
+        "avg_proxy_reward": 1.219756028022157,
+        "samples": 49104
+      }
+    },
+    {
+      "epoch": 20,
+      "loss": 1.068689356242216,
+      "td_mse": 0.07970371171113917,
+      "cql_penalty": 0.7325819604790547,
+      "behavior_cloning_loss": 0.7325819633060214,
+      "train": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2755286573723839,
+        "samples": 194313
+      },
+      "validation": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2808447376995764,
+        "samples": 49104
+      }
+    },
+    {
+      "epoch": 40,
+      "loss": 1.0648605257233916,
+      "td_mse": 0.07633496512938814,
+      "cql_penalty": 0.7322411550075195,
+      "behavior_cloning_loss": 0.7322411553973931,
+      "train": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2755286573723839,
+        "samples": 194313
+      },
+      "validation": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2808447376995764,
+        "samples": 49104
+      }
+    },
+    {
+      "epoch": 60,
+      "loss": 1.0646356613606949,
+      "td_mse": 0.07595509897230801,
+      "cql_penalty": 0.7323559754098964,
+      "behavior_cloning_loss": 0.7323559768991459,
+      "train": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2755286573723839,
+        "samples": 194313
+      },
+      "validation": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2808447376995764,
+        "samples": 49104
+      }
+    },
+    {
+      "epoch": 80,
+      "loss": 1.0646621026078598,
+      "td_mse": 0.0759301417311216,
+      "cql_penalty": 0.7323940476222245,
+      "behavior_cloning_loss": 0.7323940447952577,
+      "train": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2755286573723839,
+        "samples": 194313
+      },
+      "validation": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "avg_proxy_reward": 1.2808447376995764,
+        "samples": 49104
+      }
+    }
+  ],
+  "train_metrics": {
+    "accuracy": 1.0,
+    "avg_proxy_reward": 1.2755286573723839,
+    "samples": 194313,
+    "macro_f1": 1.0,
+    "weighted_f1": 1.0,
+    "balanced_accuracy": 1.0,
+    "actual_action_counts": {
+      "KEEP_NORMAL": 72794,
+      "ROUTE_SQLI": 34045,
+      "ROUTE_SSTI": 30111,
+      "ROUTE_CMDI": 31433,
+      "ROUTE_SSRF": 25930
+    },
+    "predicted_action_counts": {
+      "KEEP_NORMAL": 72794,
+      "ROUTE_SQLI": 34045,
+      "ROUTE_SSTI": 30111,
+      "ROUTE_CMDI": 31433,
+      "ROUTE_SSRF": 25930
+    },
+    "per_action": {
+      "KEEP_NORMAL": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 72794,
+        "predicted": 72794
+      },
+      "ROUTE_SQLI": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 34045,
+        "predicted": 34045
+      },
+      "ROUTE_SSTI": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 30111,
+        "predicted": 30111
+      },
+      "ROUTE_CMDI": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 31433,
+        "predicted": 31433
+      },
+      "ROUTE_SSRF": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 25930,
+        "predicted": 25930
+      }
+    },
+    "confusion_matrix": {
+      "KEEP_NORMAL": {
+        "KEEP_NORMAL": 72794,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_SQLI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 34045,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_SSTI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 30111,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_CMDI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 31433,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_SSRF": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 25930
+      }
+    },
+    "by_source": {
+      "replay": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.6408163265306122,
+        "samples": 34300,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 3900,
+          "ROUTE_SQLI": 8400,
+          "ROUTE_SSTI": 7600,
+          "ROUTE_CMDI": 7600,
+          "ROUTE_SSRF": 6800
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 3900,
+          "ROUTE_SQLI": 8400,
+          "ROUTE_SSTI": 7600,
+          "ROUTE_CMDI": 7600,
+          "ROUTE_SSRF": 6800
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 3900,
+            "predicted": 3900
+          },
+          "ROUTE_SQLI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 8400,
+            "predicted": 8400
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 7600,
+            "predicted": 7600
+          },
+          "ROUTE_CMDI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 7600,
+            "predicted": 7600
+          },
+          "ROUTE_SSRF": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 6800,
+            "predicted": 6800
+          }
+        }
+      },
+      "synthetic": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.197226475348878,
+        "samples": 160013,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 68894,
+          "ROUTE_SQLI": 25645,
+          "ROUTE_SSTI": 22511,
+          "ROUTE_CMDI": 23833,
+          "ROUTE_SSRF": 19130
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 68894,
+          "ROUTE_SQLI": 25645,
+          "ROUTE_SSTI": 22511,
+          "ROUTE_CMDI": 23833,
+          "ROUTE_SSRF": 19130
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 68894,
+            "predicted": 68894
+          },
+          "ROUTE_SQLI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 25645,
+            "predicted": 25645
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 22511,
+            "predicted": 22511
+          },
+          "ROUTE_CMDI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 23833,
+            "predicted": 23833
+          },
+          "ROUTE_SSRF": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 19130,
+            "predicted": 19130
+          }
+        }
+      }
+    },
+    "by_attack_type": {
+      "benign": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 0.4,
+        "samples": 64552,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 64552,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 64552,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 64552,
+            "predicted": 64552
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "cmdi": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 31433,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 31433,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 31433,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 31433,
+            "predicted": 31433
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "malformed": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 0.4,
+        "samples": 8142,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 8142,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 8142,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 8142,
+            "predicted": 8142
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "sqli": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 34045,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 34045,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 34045,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 34045,
+            "predicted": 34045
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "ssrf": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.7946215904725318,
+        "samples": 26030,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 100,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 25930
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 100,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 25930
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 100,
+            "predicted": 100
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 25930,
+            "predicted": 25930
+          }
+        }
+      },
+      "ssti": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 30111,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 30111,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 30111,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 30111,
+            "predicted": 30111
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      }
+    }
+  },
+  "validation_metrics": {
+    "accuracy": 1.0,
+    "avg_proxy_reward": 1.2808447376995764,
+    "samples": 49104,
+    "macro_f1": 1.0,
+    "weighted_f1": 1.0,
+    "balanced_accuracy": 1.0,
+    "actual_action_counts": {
+      "KEEP_NORMAL": 18209,
+      "ROUTE_SQLI": 8750,
+      "ROUTE_SSTI": 7702,
+      "ROUTE_CMDI": 7950,
+      "ROUTE_SSRF": 6493
+    },
+    "predicted_action_counts": {
+      "KEEP_NORMAL": 18209,
+      "ROUTE_SQLI": 8750,
+      "ROUTE_SSTI": 7702,
+      "ROUTE_CMDI": 7950,
+      "ROUTE_SSRF": 6493
+    },
+    "per_action": {
+      "KEEP_NORMAL": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 18209,
+        "predicted": 18209
+      },
+      "ROUTE_SQLI": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8750,
+        "predicted": 8750
+      },
+      "ROUTE_SSTI": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 7702,
+        "predicted": 7702
+      },
+      "ROUTE_CMDI": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 7950,
+        "predicted": 7950
+      },
+      "ROUTE_SSRF": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 6493,
+        "predicted": 6493
+      }
+    },
+    "confusion_matrix": {
+      "KEEP_NORMAL": {
+        "KEEP_NORMAL": 18209,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_SQLI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 8750,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_SSTI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 7702,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_CMDI": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 7950,
+        "ROUTE_SSRF": 0
+      },
+      "ROUTE_SSRF": {
+        "KEEP_NORMAL": 0,
+        "ROUTE_SQLI": 0,
+        "ROUTE_SSTI": 0,
+        "ROUTE_CMDI": 0,
+        "ROUTE_SSRF": 6493
+      }
+    },
+    "by_source": {
+      "replay": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.6444444444444444,
+        "samples": 9000,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 1000,
+          "ROUTE_SQLI": 2200,
+          "ROUTE_SSTI": 2000,
+          "ROUTE_CMDI": 2000,
+          "ROUTE_SSRF": 1800
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 1000,
+          "ROUTE_SQLI": 2200,
+          "ROUTE_SSTI": 2000,
+          "ROUTE_CMDI": 2000,
+          "ROUTE_SSRF": 1800
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 1000,
+            "predicted": 1000
+          },
+          "ROUTE_SQLI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 2200,
+            "predicted": 2200
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 2000,
+            "predicted": 2000
+          },
+          "ROUTE_CMDI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 2000,
+            "predicted": 2000
+          },
+          "ROUTE_SSRF": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 1800,
+            "predicted": 1800
+          }
+        }
+      },
+      "synthetic": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.1992469579094354,
+        "samples": 40104,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 17209,
+          "ROUTE_SQLI": 6550,
+          "ROUTE_SSTI": 5702,
+          "ROUTE_CMDI": 5950,
+          "ROUTE_SSRF": 4693
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 17209,
+          "ROUTE_SQLI": 6550,
+          "ROUTE_SSTI": 5702,
+          "ROUTE_CMDI": 5950,
+          "ROUTE_SSRF": 4693
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 17209,
+            "predicted": 17209
+          },
+          "ROUTE_SQLI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 6550,
+            "predicted": 6550
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 5702,
+            "predicted": 5702
+          },
+          "ROUTE_CMDI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 5950,
+            "predicted": 5950
+          },
+          "ROUTE_SSRF": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 4693,
+            "predicted": 4693
+          }
+        }
+      }
+    },
+    "by_attack_type": {
+      "benign": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 0.4,
+        "samples": 16230,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 16230,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 16230,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 16230,
+            "predicted": 16230
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "cmdi": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 7950,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 7950,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 7950,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 7950,
+            "predicted": 7950
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "malformed": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 0.4,
+        "samples": 1979,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 1979,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 1979,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 1979,
+            "predicted": 1979
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "sqli": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 8750,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 8750,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 8750,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 8750,
+            "predicted": 8750
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      },
+      "ssrf": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 6493,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 6493
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 0,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 6493
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 6493,
+            "predicted": 6493
+          }
+        }
+      },
+      "ssti": {
+        "accuracy": 1.0,
+        "avg_proxy_reward": 1.8,
+        "samples": 7702,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "balanced_accuracy": 1.0,
+        "actual_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 7702,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "predicted_action_counts": {
+          "KEEP_NORMAL": 0,
+          "ROUTE_SQLI": 0,
+          "ROUTE_SSTI": 7702,
+          "ROUTE_CMDI": 0,
+          "ROUTE_SSRF": 0
+        },
+        "per_action": {
+          "KEEP_NORMAL": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SQLI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSTI": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 7702,
+            "predicted": 7702
+          },
+          "ROUTE_CMDI": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          },
+          "ROUTE_SSRF": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0,
+            "predicted": 0
+          }
+        }
+      }
+    }
+  },
+  "generalization": {
+    "accuracy_gap_train_minus_validation": 0.0,
+    "macro_f1_gap_train_minus_validation": 0.0,
+    "weighted_f1_gap_train_minus_validation": 0.0,
+    "overfit_warning_accuracy_gap_gt_0_05": false,
+    "overfit_warning_macro_f1_gap_gt_0_05": false
+  }
+}

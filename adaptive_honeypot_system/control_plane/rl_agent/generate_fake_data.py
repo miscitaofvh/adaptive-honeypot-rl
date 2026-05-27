@@ -281,6 +281,7 @@ def generate_dataset(
 
                 payload = {
                     "session_id": f"session_{session_idx:05d}",
+                    "source": "synthetic",
                     "step": step,
                     "protocol": protocol,
                     "attack_type": current_attack,

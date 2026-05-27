@@ -499,6 +499,7 @@ def build_transitions(
 
             transitions.append({
                 "session_id": session_id,
+                "source": "replay",
                 "decision_id": decision.decision_id,
                 "step": step,
                 "protocol": decision.protocol,

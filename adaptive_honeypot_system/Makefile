@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer evaluate-metrics train-rl train-rl-replay train-rl-fresh clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer build-training-dataset evaluate-metrics train-rl train-rl-replay train-rl-mixed train-rl-fresh train-rl-full clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -8,6 +8,7 @@ GATEWAY_URL := http://localhost:18080
 PYTHON ?= python
 RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
 RL_REPLAY_BUFFER := control_plane/rl_agent/data/replay_buffer.jsonl
+RL_MIXED_DATASET := control_plane/rl_agent/data/mixed_train_transitions.jsonl
 RL_REPLAY_EVENTS := control_plane/replay_buffer/data/generated_events.jsonl
 METRICS_REPORT := logs/metrics_report.json
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
@@ -17,9 +18,12 @@ RL_SYNTHETIC_MAX_STEPS := 12
 RL_SYNTHETIC_SEED := 20260524
 RL_REPLAY_SESSIONS := 48
 RL_REPLAY_SEED := 20260524
+RL_REPLAY_REPEAT := 250
 RL_ALGORITHM := cql
 RL_EPOCHS := 40
 RL_BATCH_SIZE := 256
+RL_VAL_RATIO := 0.2
+RL_SPLIT_STRATEGY := grouped
 RL_LEARNING_RATE := 0.003
 RL_BEHAVIOR_CLONING_WEIGHT := 0.50
 RL_INIT_POLICY := web_prior
@@ -87,10 +91,13 @@ help:
 	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate synthetic transitions for offline RL"
 	@echo "  $(CYAN)generate-replay-buffer$(RESET) Drive Web traffic and export host logs to replay buffer"
 	@echo "  $(CYAN)export-replay-buffer$(RESET) Export runtime logs to offline RL replay buffer"
+	@echo "  $(CYAN)build-training-dataset$(RESET) Merge synthetic + replay data with source labels"
 	@echo "  $(CYAN)evaluate-metrics$(RESET)   Evaluate proposal metrics from host-mounted logs"
 	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent locally from synthetic dataset"
 	@echo "  $(CYAN)train-rl-replay$(RESET)    Train RL agent locally from exported replay buffer"
+	@echo "  $(CYAN)train-rl-mixed$(RESET)     Train RL agent locally from mixed synthetic + replay dataset"
 	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model locally"
+	@echo "  $(CYAN)train-rl-full$(RESET)      Generate synthetic/replay/mixed data then train"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -339,6 +346,16 @@ export-replay-buffer:
 	@echo "$(CYAN)[Exporting replay buffer from runtime logs...]$(RESET)"
 	@$(PYTHON) control_plane/replay_buffer/export_replay_buffer.py --output $(RL_REPLAY_BUFFER)
 
+build-training-dataset:
+	@echo "$(CYAN)[Building annotated mixed RL training dataset...]$(RESET)"
+	@test -f $(RL_DATASET) || (echo "$(RED)Missing synthetic dataset: $(RL_DATASET). Run: make gen-fake-data$(RESET)"; exit 1)
+	@test -f $(RL_REPLAY_BUFFER) || (echo "$(RED)Missing replay buffer: $(RL_REPLAY_BUFFER). Run: make generate-replay-buffer or make export-replay-buffer$(RESET)"; exit 1)
+	@$(PYTHON) control_plane/rl_agent/build_training_dataset.py \
+		--synthetic $(RL_DATASET) \
+		--replay $(RL_REPLAY_BUFFER) \
+		--output $(RL_MIXED_DATASET) \
+		--replay-repeat $(RL_REPLAY_REPEAT)
+
 evaluate-metrics:
 	@echo "$(CYAN)[Evaluating proposal metrics from host-mounted logs...]$(RESET)"
 	@$(PYTHON) control_plane/replay_buffer/evaluate_metrics.py \
@@ -356,6 +373,8 @@ train-rl:
 		--algorithm $(RL_ALGORITHM) \
 		--epochs $(RL_EPOCHS) \
 		--batch-size $(RL_BATCH_SIZE) \
+		--val-ratio $(RL_VAL_RATIO) \
+		--split-strategy $(RL_SPLIT_STRATEGY) \
 		--learning-rate $(RL_LEARNING_RATE) \
 		--cql-alpha $(CQL_ALPHA) \
 		--cql-temperature $(CQL_TEMPERATURE) \
@@ -375,6 +394,29 @@ train-rl-replay:
 		--algorithm $(RL_ALGORITHM) \
 		--epochs $(RL_EPOCHS) \
 		--batch-size $(RL_BATCH_SIZE) \
+		--val-ratio $(RL_VAL_RATIO) \
+		--split-strategy $(RL_SPLIT_STRATEGY) \
+		--learning-rate $(RL_LEARNING_RATE) \
+		--cql-alpha $(CQL_ALPHA) \
+		--cql-temperature $(CQL_TEMPERATURE) \
+		--behavior-cloning-weight $(RL_BEHAVIOR_CLONING_WEIGHT) \
+		--init-policy $(RL_INIT_POLICY) \
+		--target-update-period $(RL_TARGET_UPDATE_PERIOD) \
+		--device $(RL_DEVICE) \
+		--log-every $(RL_LOG_EVERY)
+
+train-rl-mixed:
+	@echo "$(CYAN)[Training offline RL agent locally from mixed synthetic + replay dataset...]$(RESET)"
+	@test -f $(RL_MIXED_DATASET) || (echo "$(RED)Missing mixed dataset: $(RL_MIXED_DATASET). Run: make build-training-dataset$(RESET)"; exit 1)
+	@$(PYTHON) -c "import torch" >/dev/null 2>&1 || (echo "$(RED)Missing torch for $(PYTHON). Activate venv or run: $(PYTHON) -m pip install -r control_plane/rl_agent/requirements-local.txt$(RESET)"; exit 1)
+	@$(PYTHON) -B control_plane/rl_agent/train_offline.py \
+		--dataset $(RL_MIXED_DATASET) \
+		--output $(RL_MODEL) \
+		--algorithm $(RL_ALGORITHM) \
+		--epochs $(RL_EPOCHS) \
+		--batch-size $(RL_BATCH_SIZE) \
+		--val-ratio $(RL_VAL_RATIO) \
+		--split-strategy $(RL_SPLIT_STRATEGY) \
 		--learning-rate $(RL_LEARNING_RATE) \
 		--cql-alpha $(CQL_ALPHA) \
 		--cql-temperature $(CQL_TEMPERATURE) \
@@ -386,6 +428,9 @@ train-rl-replay:
 
 train-rl-fresh: gen-fake-data train-rl
 	@echo "$(GREEN)✓ RL dataset + training completed$(RESET)"
+
+train-rl-full: gen-fake-data generate-replay-buffer build-training-dataset train-rl-mixed
+	@echo "$(GREEN)✓ Full RL data generation + mixed training completed$(RESET)"
 
 test-rl-split-ip:
 	@echo "$(CYAN)[Running split IP routing test via routing controller...]$(RESET)"
@@ -417,8 +462,9 @@ validate:
 		honeypots/ssrf_pot/app.py \
 		control_plane/state_builder/__init__.py \
 		control_plane/state_builder/state_schema.py \
-		control_plane/rl_agent/agent.py \
-		control_plane/rl_agent/generate_fake_data.py \
+			control_plane/rl_agent/agent.py \
+			control_plane/rl_agent/build_training_dataset.py \
+			control_plane/rl_agent/generate_fake_data.py \
 		control_plane/rl_agent/train_offline.py \
 		control_plane/replay_buffer/__init__.py \
 		control_plane/replay_buffer/export_replay_buffer.py \

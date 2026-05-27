@@ -1,6 +1,6 @@
 # Control Plane Architecture
 
-Tài liệu này là contract tập trung cho control plane. Các lệnh vận hành ngắn gọn nằm ở root `COMMANDS.md`; thuật toán train nằm ở `RL_TRAINING_AND_ALGORITHM.md`.
+Tài liệu này là contract tập trung cho control plane. Các lệnh vận hành ngắn gọn nằm ở root `COMMANDS.md`; thuật toán và report train nằm ở `RL_TRAINING_SUMMARY.md`.
 
 ## Scope
 
@@ -38,6 +38,7 @@ control_plane/
   rl_agent/agent.py
   rl_agent/train_offline.py
   rl_agent/generate_fake_data.py
+  rl_agent/build_training_dataset.py
   replay_buffer/export_replay_buffer.py
   replay_buffer/generate_web_replay_buffer.py
   replay_buffer/evaluate_metrics.py
@@ -199,3 +200,5 @@ It reports:
 Continuity is evaluated against the active route at each service event timestamp, so a session that later changes route is not judged forever by its first route.
 
 These evaluation fields are intentionally richer than the RL state; they exist for debugging/report metrics, not for direct model input.
+
+`rl_agent/build_training_dataset.py` merges synthetic and replay transitions and adds source labels. `train_offline.py` validates with a session-grouped, source-stratified split by default and writes detailed classification/leakage metrics beside the exported model.
