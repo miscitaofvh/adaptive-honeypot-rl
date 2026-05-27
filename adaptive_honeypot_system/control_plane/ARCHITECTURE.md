@@ -201,4 +201,4 @@ Continuity is evaluated against the active route at each service event timestamp
 
 These evaluation fields are intentionally richer than the RL state; they exist for debugging/report metrics, not for direct model input.
 
-`rl_agent/build_training_dataset.py` merges synthetic and replay transitions and adds source labels. `train_offline.py` validates with a session-grouped, source-stratified split by default and writes detailed classification/leakage metrics beside the exported model.
+`rl_agent/build_training_dataset.py` merges synthetic and replay transitions and adds source labels. `train_offline.py` validates with a session-grouped split stratified by source and dominant attack type, then writes detailed classification/leakage metrics beside the exported model. The tracked runtime artifact is `rl_agent/artifacts/rl_agent_linear.json`; historical local model archives are intentionally not tracked.

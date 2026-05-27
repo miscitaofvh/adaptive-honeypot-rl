@@ -16,28 +16,29 @@
 - LLM analyzer đọc logs, parse body/context, build `web_state`.
 - Rule fallback cho SQLi/SSTI/CMDi/SSRF khi không có LLM key.
 - Routing controller `/decide` dùng trained JSON model.
-- Offline RL training bằng torch local, default CQL.
+- Offline RL training bằng torch local/VM, CQL.
+- Current trained model artifact được track trong repo.
 - Synthetic Web-only data generator.
 - Replay buffer exporter.
 - Web replay-buffer traffic generator.
+- Mixed synthetic + replay dataset builder.
+- Strict grouped validation và per-action/source metrics cho RL training.
 - Metric evaluator từ host-mounted logs.
 - Centralized control-plane docs.
 
 ## Remaining Plan
 
-### 1. Data Collection
+### 1. Runtime Metric Report
 
-- Chạy nhiều phiên test Web attack/benign qua gateway.
-- Sinh replay buffer bằng `make generate-replay-buffer`.
-- Lưu lại metrics report sau mỗi batch bằng `make evaluate-metrics`.
-- Đảm bảo dataset có đủ bốn attack surface và benign sessions.
+- Chạy demo/test trên log sạch nếu cần số liệu nộp báo cáo.
+- Sinh report bằng `make evaluate-metrics`.
+- Dùng `logs/metrics_report.json` để báo cáo metric trong proposal.
 
-### 2. RL Experiments
+### 2. RL Maintenance
 
-- Train CQL từ synthetic dataset lớn để có baseline ổn định.
-- Train CQL từ replay buffer thật khi đủ dữ liệu.
-- Train Q-learning baseline để so sánh.
-- Báo cáo accuracy/proxy reward của train script và proposal metrics từ runtime logs riêng biệt.
+- Khi có replay buffer mới, build lại mixed dataset và train theo `RL_TRAINING_SUMMARY.md`.
+- Giữ `gamma=0.0` cho Web routing correctness hiện tại.
+- Chỉ track runtime model artifact mới nhất.
 
 ### 3. Metrics/Report
 
@@ -76,10 +77,22 @@ make clear-routes
 
 make test-adaptive-attacks
 make generate-replay-buffer PYTHON=../.venv/bin/python
+make build-training-dataset PYTHON=../.venv/bin/python RL_REPLAY_REPEAT=100
 make evaluate-metrics PYTHON=../.venv/bin/python
 
 make gen-fake-data PYTHON=../.venv/bin/python
-make train-rl PYTHON=../.venv/bin/python
+../.venv/bin/python -B control_plane/rl_agent/train_offline.py \
+  --dataset control_plane/rl_agent/data/mixed_train_transitions.jsonl \
+  --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
+  --algorithm cql \
+  --epochs 80 \
+  --gamma 0.0 \
+  --batch-size 512 \
+  --cql-alpha 1.0 \
+  --behavior-cloning-weight 0.35 \
+  --init-policy random \
+  --split-strategy grouped \
+  --val-ratio 0.2
 docker compose -f docker-compose.yml up -d --force-recreate routing_controller llm_analyzer
 curl -s -X POST http://localhost:8001/model/reload | python -m json.tool
 ```

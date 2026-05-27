@@ -2,7 +2,7 @@
 
 Đồ án này là lab Web-only để tăng attacker engagement bằng adaptive honeypot routing. Hệ thống quan sát request, suy luận intent bằng LLM analyzer hoặc rule fallback, dùng RL policy chọn honeypot phù hợp, rồi route các request tiếp theo trong cùng session sang honeypot đúng loại.
 
-Lệnh vận hành/test/train nằm trong [COMMANDS.md](COMMANDS.md). Proposal học thuật nằm trong [proposal.md](proposal.md). Plan còn lại nằm trong [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+Lệnh vận hành/test/train nằm trong [COMMANDS.md](COMMANDS.md). Tóm tắt train RL nằm trong [RL_TRAINING_SUMMARY.md](adaptive_honeypot_system/control_plane/RL_TRAINING_SUMMARY.md). Proposal học thuật nằm trong [proposal.md](proposal.md). Plan còn lại nằm trong [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ## Scope
 
@@ -13,7 +13,7 @@ Lệnh vận hành/test/train nằm trong [COMMANDS.md](COMMANDS.md). Proposal h
 - HAProxy gateway route theo cookie `sid`.
 - LLM analyzer đọc logs, enrich body, build state.
 - Routing controller gọi RL model JSON và cập nhật HAProxy maps.
-- Offline RL training local bằng torch/CQL.
+- Offline RL training bằng torch/CQL; runtime dùng model JSON đã export.
 - Replay buffer exporter và metric evaluator từ host-mounted logs.
 
 Không làm trong phạm vi hiện tại:
@@ -138,15 +138,15 @@ Các metric trong proposal hiện có đủ field để tính:
 - Real backend và honeypots có API contract tương thích.
 - LLM analyzer có Groq path và deterministic rule fallback.
 - Routing controller dùng trained JSON model, runtime không phụ thuộc torch.
-- Offline RL train local bằng torch/CQL.
+- Offline RL model CQL đã được train/tune từ mixed synthetic + replay dataset.
 - Replay buffer generator/exporter.
 - Metric evaluator từ host logs.
+- Current model artifact đã được track tại `adaptive_honeypot_system/control_plane/rl_agent/artifacts/rl_agent_linear.json`.
 
 Còn lại:
 
-- Thu thêm replay buffer thật từ nhiều session hơn.
-- Train và so sánh CQL với baseline khi dataset đủ lớn.
 - Viết báo cáo kết quả dựa trên `logs/metrics_report.json`.
+- Nếu cần cải thiện kết quả báo cáo, chạy thêm batch replay sạch rồi evaluate lại.
 - Nếu dùng Groq thật khi demo dài, polish retry/backoff và memory decay.
 
 ## Important Notes
