@@ -196,6 +196,19 @@ make evaluate-metrics PYTHON=../.venv/bin/python
 cat logs/metrics_report.json | python -m json.tool
 ```
 
+Generate CSV/PNG/Markdown figures for reporting:
+
+```bash
+make visualize-metrics PYTHON=../.venv/bin/python
+sed -n '1,160p' logs/metric_visualizations/REPORT.md
+```
+
+For a clean batch generated with a known session prefix:
+
+```bash
+make visualize-metrics PYTHON=../.venv/bin/python METRICS_SESSION_PREFIX=report_20260530
+```
+
 Metrics covered:
 
 ```text

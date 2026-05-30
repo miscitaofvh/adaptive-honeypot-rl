@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer build-training-dataset evaluate-metrics train-rl train-rl-replay train-rl-mixed train-rl-fresh train-rl-full clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer build-training-dataset evaluate-metrics visualize-metrics train-rl train-rl-replay train-rl-mixed train-rl-fresh train-rl-full clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -11,6 +11,8 @@ RL_REPLAY_BUFFER := control_plane/rl_agent/data/replay_buffer.jsonl
 RL_MIXED_DATASET := control_plane/rl_agent/data/mixed_train_transitions.jsonl
 RL_REPLAY_EVENTS := control_plane/replay_buffer/data/generated_events.jsonl
 METRICS_REPORT := logs/metrics_report.json
+METRICS_VIS_DIR := logs/metric_visualizations
+METRICS_SESSION_PREFIX ?=
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
 RL_SYNTHETIC_SESSIONS := 10000
 RL_SYNTHETIC_MIN_STEPS := 8
@@ -93,6 +95,7 @@ help:
 	@echo "  $(CYAN)export-replay-buffer$(RESET) Export runtime logs to offline RL replay buffer"
 	@echo "  $(CYAN)build-training-dataset$(RESET) Merge synthetic + replay data with source labels"
 	@echo "  $(CYAN)evaluate-metrics$(RESET)   Evaluate proposal metrics from host-mounted logs"
+	@echo "  $(CYAN)visualize-metrics$(RESET)  Generate report CSV/PNG charts from host-mounted logs"
 	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent locally from synthetic dataset"
 	@echo "  $(CYAN)train-rl-replay$(RESET)    Train RL agent locally from exported replay buffer"
 	@echo "  $(CYAN)train-rl-mixed$(RESET)     Train RL agent locally from mixed synthetic + replay dataset"
@@ -363,6 +366,13 @@ evaluate-metrics:
 		--output $(METRICS_REPORT) \
 		--pretty
 
+visualize-metrics:
+	@echo "$(CYAN)[Generating proposal metric tables and figures...]$(RESET)"
+	@$(PYTHON) control_plane/replay_buffer/visualize_metrics.py \
+		--logs-dir logs \
+		--output-dir $(METRICS_VIS_DIR) \
+		$(if $(METRICS_SESSION_PREFIX),--session-prefix $(METRICS_SESSION_PREFIX),)
+
 train-rl:
 	@echo "$(CYAN)[Training offline RL agent locally...]$(RESET)"
 	@test -f $(RL_DATASET) || (echo "$(RED)Missing dataset: $(RL_DATASET). Run: make gen-fake-data$(RESET)"; exit 1)
@@ -459,19 +469,20 @@ validate:
 		honeypots/cmdi_pot/app.py \
 		honeypots/sqli_pot/app.py \
 		honeypots/ssti_pot/app.py \
-		honeypots/ssrf_pot/app.py \
-		control_plane/state_builder/__init__.py \
-		control_plane/state_builder/state_schema.py \
+			honeypots/ssrf_pot/app.py \
+			control_plane/state_builder/__init__.py \
+			control_plane/state_builder/state_schema.py \
 			control_plane/rl_agent/agent.py \
 			control_plane/rl_agent/build_training_dataset.py \
 			control_plane/rl_agent/generate_fake_data.py \
-		control_plane/rl_agent/train_offline.py \
-		control_plane/replay_buffer/__init__.py \
-		control_plane/replay_buffer/export_replay_buffer.py \
-		control_plane/replay_buffer/evaluate_metrics.py \
-		control_plane/replay_buffer/generate_web_replay_buffer.py \
-		control_plane/routing_controller/main.py \
-		control_plane/llm_analyzer/analyzer.py
+			control_plane/rl_agent/train_offline.py \
+			control_plane/replay_buffer/__init__.py \
+			control_plane/replay_buffer/export_replay_buffer.py \
+			control_plane/replay_buffer/evaluate_metrics.py \
+			control_plane/replay_buffer/generate_web_replay_buffer.py \
+			control_plane/replay_buffer/visualize_metrics.py \
+			control_plane/routing_controller/main.py \
+			control_plane/llm_analyzer/analyzer.py
 	@echo "$(GREEN)✓ Syntax check complete$(RESET)"
 	@echo "$(CYAN)[Checking routing controller health...]$(RESET)"
 	@curl -fsS http://localhost:8001/health >/dev/null

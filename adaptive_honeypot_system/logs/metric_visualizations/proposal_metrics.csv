@@ -1,0 +1,10 @@
+metric,value,percent
+honeypot_engagement_rate,0.960784,96.078
+correct_honeypot_routing_rate,0.960784,96.078
+false_rerouting_rate_on_benign_sessions,0.615385,61.538
+normal_service_continuity_rate,1.0,100.0
+avg_requests_after_adaptive_rerouting,3.37931,
+session_length_seconds_avg,5.908434,
+session_length_seconds_p50,4.356903,
+session_length_seconds_p95,10.576108,
+session_length_seconds_max,36.013551,

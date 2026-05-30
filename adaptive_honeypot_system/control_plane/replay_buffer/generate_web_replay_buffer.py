@@ -87,10 +87,65 @@ CASES = {
 }
 
 
+ATTACK_VARIANTS = {
+    "sqli": [
+        {"query": "uNiOn/**/SeLeCt/**/password/**/FrOm/**/users--"},
+        {"query": "' OR/**/1=1--"},
+        {"query": "admin' AND extractvalue(1,concat(0x7e,(select database())))--"},
+        {"query": "%27%20UNION%20SELECT%20NULL,password%20FROM%20users--"},
+        {"query": "1';WAITFOR DELAY '0:0:2'--"},
+        {"query": "Robert'); DROP TABLE audit_log;--"},
+    ],
+    "cmdi": [
+        {"host": "8.8.8.8&&id"},
+        {"host": "127.0.0.1|whoami"},
+        {"host": "localhost$(id)"},
+        {"host": "8.8.8.8%3Bid"},
+        {"host": "example.com`uname -a`"},
+        {"host": "1.1.1.1\nid"},
+    ],
+    "ssti": [
+        {"content": "# Notes\n\n{{7*7}}\n\nNormal **markdown** around the expression."},
+        {"content": "# Invoice\n\nSubtotal: {{ 6 * 7 }}\n\n```jinja2\n{{config}}\n```"},
+        {"content": "{% for x in [7] %}{{x*x}}{% endfor %}\n\nKeep rendering markdown."},
+        {"content": "# Debug\n\n{{ ''.__class__.__mro__[1].__subclasses__()[:2] }}"},
+        {"content": "# Mixed\n\nType some **Markdown** here.\n\n${{7*7}}\n\n{{7*7}}"},
+    ],
+    "ssrf": [
+        {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"},
+        {"url": "http://[::ffff:169.254.169.254]/latest/meta-data/"},
+        {"url": "http://0177.0.0.1/admin"},
+        {"url": "http://localhost:5000/internal/status"},
+        {"url": "http://2130706433/latest/meta-data/"},
+        {"url": "http://metadata.google.internal/computeMetadata/v1/"},
+    ],
+}
+
+
 BENIGN_REQUESTS = [
     TrafficCase("benign", "GET", "/api/articles?page=1&limit=2", {}, None),
     TrafficCase("benign", "POST", "/api/articles/search", {"query": "tcp"}, None),
     TrafficCase("benign", "POST", "/api/tools/preview", {"content": "# Hello\n\nNormal markdown."}, None),
+]
+
+
+BENIGN_NEAR_MISS_REQUESTS = [
+    TrafficCase(
+        "benign",
+        "POST",
+        "/api/articles/search",
+        {"query": "SQL injection prevention union select examples"},
+        None,
+    ),
+    TrafficCase(
+        "benign",
+        "POST",
+        "/api/tools/preview",
+        {"content": "# Jinja2 notes\n\nUse `{{ user.name }}` in templates, but never render untrusted input."},
+        None,
+    ),
+    TrafficCase("benign", "POST", "/api/tools/ping", {"host": "8.8.8.8"}, None),
+    TrafficCase("benign", "POST", "/api/tools/fetch", {"url": "https://example.com"}, None),
 ]
 
 
@@ -100,6 +155,20 @@ CROSS_SURFACE_REQUESTS = {
     "ssti": TrafficCase("benign", "POST", "/api/tools/ping", {"host": "bad host"}, None),
     "ssrf": TrafficCase("benign", "POST", "/api/tools/preview", {"content": "# Cross surface"}, None),
 }
+
+
+def variant_case(kind: str, rng: random.Random, evasion_ratio: float) -> TrafficCase:
+    base_case = CASES[kind]
+    variants = ATTACK_VARIANTS.get(kind) or []
+    if not variants or rng.random() > evasion_ratio:
+        return base_case
+    return TrafficCase(
+        kind=base_case.kind,
+        method=base_case.method,
+        path=base_case.path,
+        body=dict(rng.choice(variants)),
+        expected_backend=base_case.expected_backend,
+    )
 
 
 def now_run_id() -> str:
@@ -301,14 +370,22 @@ def drive_session(
     route_poll_interval: float,
     request_timeout: float,
     followups: int,
+    evasion_ratio: float,
+    benign_near_miss_ratio: float,
     rng: random.Random,
 ) -> dict[str, Any]:
     statuses: list[int] = []
+    variants_used: list[dict[str, Any]] = []
     routed = False
     expected_backend: Optional[str] = None
 
     if kind == "benign":
         requests = list(BENIGN_REQUESTS)
+        near_miss_count = 0
+        for near_miss in BENIGN_NEAR_MISS_REQUESTS:
+            if rng.random() <= benign_near_miss_ratio:
+                requests.append(near_miss)
+                near_miss_count += 1
         rng.shuffle(requests)
         for case in requests:
             status, _ = request_json(base_url=base_url, case=case, session_id=session_id, timeout=request_timeout)
@@ -320,12 +397,14 @@ def drive_session(
             "expected_backend": None,
             "routed": False,
             "statuses": statuses,
+            "variants": {"benign_near_miss_requests": near_miss_count},
         }
 
-    case = CASES[kind]
+    case = variant_case(kind, rng, evasion_ratio)
     expected_backend = case.expected_backend
     status, _ = request_json(base_url=base_url, case=case, session_id=session_id, timeout=request_timeout)
     statuses.append(status)
+    variants_used.append(case.body)
 
     if expected_backend:
         routed = wait_for_route(
@@ -337,8 +416,10 @@ def drive_session(
         )
 
     for _ in range(max(1, followups)):
+        case = variant_case(kind, rng, evasion_ratio)
         status, _ = request_json(base_url=base_url, case=case, session_id=session_id, timeout=request_timeout)
         statuses.append(status)
+        variants_used.append(case.body)
         time.sleep(rng.uniform(0.04, 0.14))
 
     cross_surface = CROSS_SURFACE_REQUESTS.get(kind)
@@ -357,6 +438,7 @@ def drive_session(
         "expected_backend": expected_backend,
         "routed": routed,
         "statuses": statuses,
+        "variants": variants_used,
     }
 
 
@@ -381,6 +463,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--route-poll-interval", type=float, default=1.0)
     parser.add_argument("--request-timeout", type=float, default=8.0)
     parser.add_argument("--followups", type=int, default=2)
+    parser.add_argument("--evasion-ratio", type=float, default=0.70)
+    parser.add_argument("--benign-near-miss-ratio", type=float, default=0.50)
     parser.add_argument("--post-traffic-wait", type=float, default=7.0)
     parser.add_argument("--horizon-seconds", type=float, default=60.0)
     parser.add_argument("--session-timeout-seconds", type=float, default=180.0)
@@ -397,6 +481,10 @@ def main() -> None:
         raise ValueError("--sessions must be > 0")
     if args.followups < 0:
         raise ValueError("--followups must be >= 0")
+    if not 0.0 <= args.evasion_ratio <= 1.0:
+        raise ValueError("--evasion-ratio must be between 0 and 1")
+    if not 0.0 <= args.benign_near_miss_ratio <= 1.0:
+        raise ValueError("--benign-near-miss-ratio must be between 0 and 1")
     if args.no_clear_routes and not args.skip_preflight:
         raise ValueError("--no-clear-routes requires --skip-preflight")
 
@@ -424,6 +512,8 @@ def main() -> None:
             route_poll_interval=args.route_poll_interval,
             request_timeout=args.request_timeout,
             followups=args.followups,
+            evasion_ratio=args.evasion_ratio,
+            benign_near_miss_ratio=args.benign_near_miss_ratio,
             rng=rng,
         )
         session_results.append(result)
@@ -451,11 +541,18 @@ def main() -> None:
 
     kind_counts = Counter(result["kind"] for result in session_results)
     routed_counts = Counter(result["kind"] for result in session_results if result["routed"])
+    near_miss_requests = sum(
+        int((result.get("variants") or {}).get("benign_near_miss_requests", 0))
+        for result in session_results
+        if result["kind"] == "benign"
+    )
 
     print("Replay traffic generation complete", flush=True)
     print(f"- Prefix: {args.prefix}", flush=True)
     print(f"- Session mix: {dict(kind_counts)}", flush=True)
     print(f"- Routed attack sessions: {dict(routed_counts)}", flush=True)
+    print(f"- Evasion ratio: {args.evasion_ratio}", flush=True)
+    print(f"- Benign near-miss requests: {near_miss_requests}", flush=True)
     print(f"- Host events collected: {event_count}", flush=True)
     print(f"- Event JSONL: {args.event_output}", flush=True)
     print(f"- Replay buffer: {args.output}", flush=True)

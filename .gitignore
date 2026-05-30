@@ -26,3 +26,12 @@ adaptive_honeypot_system/control_plane/replay_buffer/data/*
 adaptive_honeypot_system/logs/*
 !adaptive_honeypot_system/logs/.gitkeep
 !adaptive_honeypot_system/logs/README.md
+!adaptive_honeypot_system/logs/real_backend/
+!adaptive_honeypot_system/logs/real_backend/service_requests.jsonl
+!adaptive_honeypot_system/logs/honeypots/
+!adaptive_honeypot_system/logs/honeypots/*/
+!adaptive_honeypot_system/logs/honeypots/*/service_requests.jsonl
+!adaptive_honeypot_system/logs/llm_analyzer/
+!adaptive_honeypot_system/logs/llm_analyzer/llm_fields.jsonl
+!adaptive_honeypot_system/logs/metric_visualizations/
+!adaptive_honeypot_system/logs/metric_visualizations/**

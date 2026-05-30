@@ -1,0 +1,63 @@
+{
+  "inputs": {
+    "events": 535,
+    "decision_events": 118,
+    "service_events": 344,
+    "sessions": 64,
+    "attack_sessions": 58,
+    "benign_sessions": 6,
+    "routed_sessions": 58,
+    "routed_attack_sessions": 58,
+    "ground_truth_labeled_sessions": 64,
+    "ground_truth_attack_sessions": 51,
+    "ground_truth_benign_sessions": 13,
+    "ground_truth_routed_sessions": 58
+  },
+  "metric_coverage": {
+    "has_llm_decision_fields": true,
+    "has_host_service_fields": true,
+    "has_route_match_fields": true,
+    "has_expected_backend_fields": true
+  },
+  "metrics": {
+    "honeypot_engagement_rate": 0.960784,
+    "avg_requests_after_adaptive_rerouting": 3.37931,
+    "session_length_seconds": {
+      "avg": 5.908434,
+      "p50": 4.356903,
+      "p95": 10.576108,
+      "max": 36.013551
+    },
+    "correct_honeypot_routing_rate": 0.960784,
+    "false_rerouting_rate_on_benign_sessions": 0.615385,
+    "normal_service_continuity_rate": 1.0
+  },
+  "supporting_counts": {
+    "honeypot_service_events": 147,
+    "engaged_attack_sessions": 49,
+    "false_rerouted_benign_sessions": 8,
+    "continuity_checked_events": 49,
+    "continuity_failures": 0,
+    "correctly_routed_attack_sessions": 49
+  },
+  "sample_continuity_failures": [],
+  "metric_notes": {
+    "honeypot_engagement_rate": "actual attack sessions with at least one honeypot follow-up / actual attack sessions",
+    "avg_requests_after_adaptive_rerouting": "mean host service events after the first applied adaptive route per routed session",
+    "session_length_seconds": "duration between first and last host service event per session",
+    "correct_honeypot_routing_rate": "actual attack sessions whose first applied honeypot route matches the attack type and has matching honeypot follow-up / actual attack sessions",
+    "false_rerouting_rate_on_benign_sessions": "ground-truth benign sessions routed to any honeypot / ground-truth benign sessions",
+    "normal_service_continuity_rate": "after a route, every non-target API surface that still hits real_service / all non-target API-surface follow-ups"
+  },
+  "logs_dir": "logs",
+  "session_prefix": "evasion_20260530",
+  "log_files": [
+    "logs/honeypots/cmdi/service_requests.jsonl",
+    "logs/honeypots/sqli/service_requests.jsonl",
+    "logs/honeypots/ssrf/service_requests.jsonl",
+    "logs/honeypots/ssti/service_requests.jsonl",
+    "logs/llm_analyzer/llm_fields.jsonl",
+    "logs/real_backend/service_requests.jsonl"
+  ],
+  "metric_source": "session_id_ground_truth"
+}

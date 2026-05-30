@@ -80,3 +80,10 @@ Sinh report metric:
 make evaluate-metrics
 cat logs/metrics_report.json | python -m json.tool
 ```
+
+Sinh bảng CSV và biểu đồ PNG cho báo cáo:
+
+```bash
+make visualize-metrics
+sed -n '1,160p' logs/metric_visualizations/REPORT.md
+```
