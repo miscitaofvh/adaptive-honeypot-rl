@@ -1,17 +1,17 @@
 {
   "inputs": {
-    "events": 535,
-    "decision_events": 118,
-    "service_events": 344,
-    "sessions": 64,
-    "attack_sessions": 58,
-    "benign_sessions": 6,
-    "routed_sessions": 58,
-    "routed_attack_sessions": 58,
-    "ground_truth_labeled_sessions": 64,
-    "ground_truth_attack_sessions": 51,
-    "ground_truth_benign_sessions": 13,
-    "ground_truth_routed_sessions": 58
+    "events": 4059,
+    "decision_events": 435,
+    "service_events": 1678,
+    "sessions": 288,
+    "attack_sessions": 229,
+    "benign_sessions": 59,
+    "routed_sessions": 229,
+    "routed_attack_sessions": 229,
+    "ground_truth_labeled_sessions": 288,
+    "ground_truth_attack_sessions": 207,
+    "ground_truth_benign_sessions": 81,
+    "ground_truth_routed_sessions": 229
   },
   "metric_coverage": {
     "has_llm_decision_fields": true,
@@ -20,44 +20,182 @@
     "has_expected_backend_fields": true
   },
   "metrics": {
-    "honeypot_engagement_rate": 0.960784,
-    "avg_requests_after_adaptive_rerouting": 3.37931,
+    "honeypot_engagement_rate": 0.714976,
+    "avg_requests_after_adaptive_rerouting": 3.28821,
     "session_length_seconds": {
-      "avg": 5.908434,
-      "p50": 4.356903,
-      "p95": 10.576108,
-      "max": 36.013551
+      "min": 0.157199,
+      "median": 4.488235,
+      "avg": 4.070582,
+      "max": 30.621694
     },
-    "correct_honeypot_routing_rate": 0.960784,
-    "false_rerouting_rate_on_benign_sessions": 0.615385,
+    "correct_honeypot_routing_rate": 0.927536,
+    "outcome_verified_correct_routing_rate": 0.714976,
+    "false_rerouting_rate_on_benign_sessions": 0.45679,
     "normal_service_continuity_rate": 1.0
   },
   "supporting_counts": {
-    "honeypot_service_events": 147,
-    "engaged_attack_sessions": 49,
-    "false_rerouted_benign_sessions": 8,
-    "continuity_checked_events": 49,
+    "honeypot_service_events": 619,
+    "engaged_attack_sessions": 148,
+    "correct_route_decision_attack_sessions": 192,
+    "outcome_verified_correct_attack_sessions": 148,
+    "false_rerouted_benign_sessions": 37,
+    "continuity_checked_events": 146,
     "continuity_failures": 0,
-    "correctly_routed_attack_sessions": 49
+    "correctly_routed_attack_sessions": 192
   },
   "sample_continuity_failures": [],
   "metric_notes": {
     "honeypot_engagement_rate": "actual attack sessions with at least one honeypot follow-up / actual attack sessions",
     "avg_requests_after_adaptive_rerouting": "mean host service events after the first applied adaptive route per routed session",
     "session_length_seconds": "duration between first and last host service event per session",
-    "correct_honeypot_routing_rate": "actual attack sessions whose first applied honeypot route matches the attack type and has matching honeypot follow-up / actual attack sessions",
+    "correct_honeypot_routing_rate": "actual attack sessions whose first applied honeypot route matches the attack type / actual attack sessions",
+    "outcome_verified_correct_routing_rate": "actual attack sessions whose first applied honeypot route matches the attack type and has matching honeypot follow-up / actual attack sessions",
     "false_rerouting_rate_on_benign_sessions": "ground-truth benign sessions routed to any honeypot / ground-truth benign sessions",
     "normal_service_continuity_rate": "after a route, every non-target API surface that still hits real_service / all non-target API-surface follow-ups"
   },
-  "logs_dir": "logs",
-  "session_prefix": "evasion_20260530",
+  "logs_dir": "adaptive_honeypot_system/logs",
+  "session_prefix": "",
   "log_files": [
-    "logs/honeypots/cmdi/service_requests.jsonl",
-    "logs/honeypots/sqli/service_requests.jsonl",
-    "logs/honeypots/ssrf/service_requests.jsonl",
-    "logs/honeypots/ssti/service_requests.jsonl",
-    "logs/llm_analyzer/llm_fields.jsonl",
-    "logs/real_backend/service_requests.jsonl"
+    "adaptive_honeypot_system/logs/honeypots/cmdi/service_requests.jsonl",
+    "adaptive_honeypot_system/logs/honeypots/sqli/service_requests.jsonl",
+    "adaptive_honeypot_system/logs/honeypots/ssrf/service_requests.jsonl",
+    "adaptive_honeypot_system/logs/honeypots/ssti/service_requests.jsonl",
+    "adaptive_honeypot_system/logs/llm_analyzer/llm_fields.jsonl",
+    "adaptive_honeypot_system/logs/real_backend/service_requests.jsonl",
+    "adaptive_honeypot_system/logs/rule_based_baseline/rule_based_decisions.jsonl"
   ],
-  "metric_source": "session_id_ground_truth"
+  "traffic_manifest": "adaptive_honeypot_system/control_plane/replay_buffer/data/obf_20260602_combined_traffic_manifest.json",
+  "metric_source": "session_id_ground_truth",
+  "supporting_statistics": {
+    "traffic_manifest_loaded": true,
+    "manifest_sessions": 288,
+    "payload_requests": 1678,
+    "obfuscated_payload_requests": 633,
+    "routing_outcome_summary": [
+      {
+        "group": "Attack",
+        "outcome": "Route \u0111\u00fang v\u00e0 c\u00f3 engagement",
+        "sessions": 148,
+        "percent": 71.498,
+        "research_question": "RQ2/RQ4"
+      },
+      {
+        "group": "Attack",
+        "outcome": "Route \u0111\u00fang nh\u01b0ng ch\u01b0a c\u00f3 engagement",
+        "sessions": 44,
+        "percent": 21.256,
+        "research_question": "RQ4"
+      },
+      {
+        "group": "Attack",
+        "outcome": "Kh\u00f4ng route \u0111\u00fang ho\u1eb7c kh\u00f4ng route",
+        "sessions": 15,
+        "percent": 7.246,
+        "research_question": "RQ2"
+      },
+      {
+        "group": "Benign",
+        "outcome": "Gi\u1eef \u1edf normal service",
+        "sessions": 44,
+        "percent": 54.321,
+        "research_question": "RQ4"
+      },
+      {
+        "group": "Benign",
+        "outcome": "B\u1ecb route nh\u1ea7m v\u00e0o honeypot",
+        "sessions": 37,
+        "percent": 45.679,
+        "research_question": "RQ4"
+      }
+    ],
+    "decision_latency_summary": [
+      {
+        "metric": "analysis_duration_ms",
+        "count": 435,
+        "min_ms": 161.79,
+        "avg_ms": 1233.791,
+        "max_ms": 10406.58,
+        "under_1s_percent": 86.897,
+        "under_5s_percent": 88.506,
+        "under_10s_percent": 99.77,
+        "over_30s_percent": 0.0
+      },
+      {
+        "metric": "controller_roundtrip_ms",
+        "count": 268,
+        "min_ms": 33.34,
+        "avg_ms": 45.6,
+        "max_ms": 68.42,
+        "under_1s_percent": 100.0,
+        "under_5s_percent": 100.0,
+        "under_10s_percent": 100.0,
+        "over_30s_percent": 0.0
+      },
+      {
+        "metric": "event_to_decision_latency_ms",
+        "count": 435,
+        "min_ms": 619.39,
+        "avg_ms": 11916.596,
+        "max_ms": 101420.6,
+        "under_1s_percent": 0.69,
+        "under_5s_percent": 66.667,
+        "under_10s_percent": 87.816,
+        "over_30s_percent": 11.034
+      }
+    ],
+    "event_to_decision_latency_buckets": [
+      {
+        "bucket": "<= 1s",
+        "decisions": 3,
+        "percent": 0.69
+      },
+      {
+        "bucket": "1-5s",
+        "decisions": 287,
+        "percent": 65.977
+      },
+      {
+        "bucket": "5-10s",
+        "decisions": 92,
+        "percent": 21.149
+      },
+      {
+        "bucket": "10-30s",
+        "decisions": 5,
+        "percent": 1.149
+      },
+      {
+        "bucket": "> 30s",
+        "decisions": 48,
+        "percent": 11.034
+      }
+    ],
+    "session_length_buckets": [
+      {
+        "bucket": "<= 1s",
+        "sessions": 57,
+        "percent": 19.792
+      },
+      {
+        "bucket": "1-3s",
+        "sessions": 31,
+        "percent": 10.764
+      },
+      {
+        "bucket": "3-10s",
+        "sessions": 198,
+        "percent": 68.75
+      },
+      {
+        "bucket": "10-30s",
+        "sessions": 1,
+        "percent": 0.347
+      },
+      {
+        "bucket": "> 30s",
+        "sessions": 1,
+        "percent": 0.347
+      }
+    ]
+  }
 }

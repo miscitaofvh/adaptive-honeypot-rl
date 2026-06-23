@@ -1,4 +1,4 @@
-.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer build-training-dataset evaluate-metrics visualize-metrics train-rl train-rl-replay train-rl-mixed train-rl-fresh train-rl-full clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
+.PHONY: help build up down logs clean restart test mode-normal mode-honeypot mode-debug mode-attack mode-show status ps shell gen-fake-data generate-replay-buffer export-replay-buffer build-training-dataset evaluate-metrics visualize-metrics evaluate-rule-baseline train-rl train-rl-replay train-rl-fresh train-rl-full clear-routes test-rl-split-ip test-adaptive-web test-adaptive-attacks validate
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -6,13 +6,17 @@ PROJECT_NAME := adaptive-honeypot-rl
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 GATEWAY_URL := http://localhost:18080
 PYTHON ?= python
-RL_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
+RL_GENERATED_DATASET := control_plane/rl_agent/data/fake_transitions.jsonl
 RL_REPLAY_BUFFER := control_plane/rl_agent/data/replay_buffer.jsonl
-RL_MIXED_DATASET := control_plane/rl_agent/data/mixed_train_transitions.jsonl
+RL_TRAINING_DATASET := control_plane/rl_agent/data/training_dataset.jsonl
 RL_REPLAY_EVENTS := control_plane/replay_buffer/data/generated_events.jsonl
 METRICS_REPORT := logs/metrics_report.json
 METRICS_VIS_DIR := logs/metric_visualizations
 METRICS_SESSION_PREFIX ?=
+METRICS_MANIFEST ?=
+RULE_BASELINE_MANIFEST ?= control_plane/replay_buffer/data/obf_20260602_combined_traffic_manifest.json
+RULE_BASELINE_OUTPUT_DIR ?= logs/rule_based_baseline
+RULE_BASELINE_ADAPTIVE_REPORT ?= logs/metric_visualizations/proposal_metrics_report.json
 RL_MODEL := control_plane/rl_agent/artifacts/rl_agent_linear.json
 RL_SYNTHETIC_SESSIONS := 10000
 RL_SYNTHETIC_MIN_STEPS := 8
@@ -90,17 +94,17 @@ help:
 	@echo "  $(CYAN)validate$(RESET)           Run syntax + core smoke checks"
 	@echo ""
 	@echo "$(YELLOW)RL TRAINING:$(RESET)"
-	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate synthetic transitions for offline RL"
+	@echo "  $(CYAN)gen-fake-data$(RESET)      Generate transitions used as one input of the training dataset"
 	@echo "  $(CYAN)generate-replay-buffer$(RESET) Drive Web traffic and export host logs to replay buffer"
 	@echo "  $(CYAN)export-replay-buffer$(RESET) Export runtime logs to offline RL replay buffer"
-	@echo "  $(CYAN)build-training-dataset$(RESET) Merge synthetic + replay data with source labels"
+	@echo "  $(CYAN)build-training-dataset$(RESET) Build the unified offline RL training dataset"
 	@echo "  $(CYAN)evaluate-metrics$(RESET)   Evaluate proposal metrics from host-mounted logs"
 	@echo "  $(CYAN)visualize-metrics$(RESET)  Generate report CSV/PNG charts from host-mounted logs"
-	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent locally from synthetic dataset"
+	@echo "  $(CYAN)evaluate-rule-baseline$(RESET) Generate rule-based baseline metrics for RQ1"
+	@echo "  $(CYAN)train-rl$(RESET)           Train RL agent locally from the unified training dataset"
 	@echo "  $(CYAN)train-rl-replay$(RESET)    Train RL agent locally from exported replay buffer"
-	@echo "  $(CYAN)train-rl-mixed$(RESET)     Train RL agent locally from mixed synthetic + replay dataset"
-	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate data then train model locally"
-	@echo "  $(CYAN)train-rl-full$(RESET)      Generate synthetic/replay/mixed data then train"
+	@echo "  $(CYAN)train-rl-fresh$(RESET)     Generate/collect data, build the unified dataset, then train"
+	@echo "  $(CYAN)train-rl-full$(RESET)      Alias of train-rl-fresh"
 	@echo ""
 	@echo "$(YELLOW)CONTAINER INTERACTION:$(RESET)"
 	@echo "  $(CYAN)shell-backend$(RESET)      Open shell in backend container"
@@ -331,7 +335,7 @@ test-honeypots:
 gen-fake-data:
 	@echo "$(CYAN)[Generating synthetic RL dataset...]$(RESET)"
 	@$(PYTHON) control_plane/rl_agent/generate_fake_data.py \
-		--output $(RL_DATASET) \
+		--output $(RL_GENERATED_DATASET) \
 		--sessions $(RL_SYNTHETIC_SESSIONS) \
 		--min-steps $(RL_SYNTHETIC_MIN_STEPS) \
 		--max-steps $(RL_SYNTHETIC_MAX_STEPS) \
@@ -350,13 +354,13 @@ export-replay-buffer:
 	@$(PYTHON) control_plane/replay_buffer/export_replay_buffer.py --output $(RL_REPLAY_BUFFER)
 
 build-training-dataset:
-	@echo "$(CYAN)[Building annotated mixed RL training dataset...]$(RESET)"
-	@test -f $(RL_DATASET) || (echo "$(RED)Missing synthetic dataset: $(RL_DATASET). Run: make gen-fake-data$(RESET)"; exit 1)
+	@echo "$(CYAN)[Building unified offline RL training dataset...]$(RESET)"
+	@test -f $(RL_GENERATED_DATASET) || (echo "$(RED)Missing generated dataset: $(RL_GENERATED_DATASET). Run: make gen-fake-data$(RESET)"; exit 1)
 	@test -f $(RL_REPLAY_BUFFER) || (echo "$(RED)Missing replay buffer: $(RL_REPLAY_BUFFER). Run: make generate-replay-buffer or make export-replay-buffer$(RESET)"; exit 1)
 	@$(PYTHON) control_plane/rl_agent/build_training_dataset.py \
-		--synthetic $(RL_DATASET) \
+		--synthetic $(RL_GENERATED_DATASET) \
 		--replay $(RL_REPLAY_BUFFER) \
-		--output $(RL_MIXED_DATASET) \
+		--output $(RL_TRAINING_DATASET) \
 		--replay-repeat $(RL_REPLAY_REPEAT)
 
 evaluate-metrics:
@@ -371,14 +375,22 @@ visualize-metrics:
 	@$(PYTHON) control_plane/replay_buffer/visualize_metrics.py \
 		--logs-dir logs \
 		--output-dir $(METRICS_VIS_DIR) \
+		$(if $(METRICS_MANIFEST),--manifest $(METRICS_MANIFEST),) \
 		$(if $(METRICS_SESSION_PREFIX),--session-prefix $(METRICS_SESSION_PREFIX),)
 
+evaluate-rule-baseline:
+	@echo "$(CYAN)[Evaluating rule-based baseline for RQ1...]$(RESET)"
+	@$(PYTHON) control_plane/rule_based_baseline/evaluate_rule_based_baseline.py \
+		--manifest $(RULE_BASELINE_MANIFEST) \
+		--adaptive-report $(RULE_BASELINE_ADAPTIVE_REPORT) \
+		--output-dir $(RULE_BASELINE_OUTPUT_DIR)
+
 train-rl:
-	@echo "$(CYAN)[Training offline RL agent locally...]$(RESET)"
-	@test -f $(RL_DATASET) || (echo "$(RED)Missing dataset: $(RL_DATASET). Run: make gen-fake-data$(RESET)"; exit 1)
+	@echo "$(CYAN)[Training offline RL agent locally from the unified dataset...]$(RESET)"
+	@test -f $(RL_TRAINING_DATASET) || (echo "$(RED)Missing training dataset: $(RL_TRAINING_DATASET). Run: make build-training-dataset$(RESET)"; exit 1)
 	@$(PYTHON) -c "import torch" >/dev/null 2>&1 || (echo "$(RED)Missing torch for $(PYTHON). Activate venv or run: $(PYTHON) -m pip install -r control_plane/rl_agent/requirements-local.txt$(RESET)"; exit 1)
 	@$(PYTHON) -B control_plane/rl_agent/train_offline.py \
-		--dataset $(RL_DATASET) \
+		--dataset $(RL_TRAINING_DATASET) \
 		--output $(RL_MODEL) \
 		--algorithm $(RL_ALGORITHM) \
 		--epochs $(RL_EPOCHS) \
@@ -415,32 +427,11 @@ train-rl-replay:
 		--device $(RL_DEVICE) \
 		--log-every $(RL_LOG_EVERY)
 
-train-rl-mixed:
-	@echo "$(CYAN)[Training offline RL agent locally from mixed synthetic + replay dataset...]$(RESET)"
-	@test -f $(RL_MIXED_DATASET) || (echo "$(RED)Missing mixed dataset: $(RL_MIXED_DATASET). Run: make build-training-dataset$(RESET)"; exit 1)
-	@$(PYTHON) -c "import torch" >/dev/null 2>&1 || (echo "$(RED)Missing torch for $(PYTHON). Activate venv or run: $(PYTHON) -m pip install -r control_plane/rl_agent/requirements-local.txt$(RESET)"; exit 1)
-	@$(PYTHON) -B control_plane/rl_agent/train_offline.py \
-		--dataset $(RL_MIXED_DATASET) \
-		--output $(RL_MODEL) \
-		--algorithm $(RL_ALGORITHM) \
-		--epochs $(RL_EPOCHS) \
-		--batch-size $(RL_BATCH_SIZE) \
-		--val-ratio $(RL_VAL_RATIO) \
-		--split-strategy $(RL_SPLIT_STRATEGY) \
-		--learning-rate $(RL_LEARNING_RATE) \
-		--cql-alpha $(CQL_ALPHA) \
-		--cql-temperature $(CQL_TEMPERATURE) \
-		--behavior-cloning-weight $(RL_BEHAVIOR_CLONING_WEIGHT) \
-		--init-policy $(RL_INIT_POLICY) \
-		--target-update-period $(RL_TARGET_UPDATE_PERIOD) \
-		--device $(RL_DEVICE) \
-		--log-every $(RL_LOG_EVERY)
+train-rl-fresh: gen-fake-data generate-replay-buffer build-training-dataset train-rl
+	@echo "$(GREEN)✓ Unified training dataset + training completed$(RESET)"
 
-train-rl-fresh: gen-fake-data train-rl
-	@echo "$(GREEN)✓ RL dataset + training completed$(RESET)"
-
-train-rl-full: gen-fake-data generate-replay-buffer build-training-dataset train-rl-mixed
-	@echo "$(GREEN)✓ Full RL data generation + mixed training completed$(RESET)"
+train-rl-full: train-rl-fresh
+	@echo "$(GREEN)✓ Full RL data generation + unified training completed$(RESET)"
 
 test-rl-split-ip:
 	@echo "$(CYAN)[Running split IP routing test via routing controller...]$(RESET)"
@@ -481,6 +472,7 @@ validate:
 			control_plane/replay_buffer/evaluate_metrics.py \
 			control_plane/replay_buffer/generate_web_replay_buffer.py \
 			control_plane/replay_buffer/visualize_metrics.py \
+			control_plane/rule_based_baseline/evaluate_rule_based_baseline.py \
 			control_plane/routing_controller/main.py \
 			control_plane/llm_analyzer/analyzer.py
 	@echo "$(GREEN)✓ Syntax check complete$(RESET)"

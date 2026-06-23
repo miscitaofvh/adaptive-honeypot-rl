@@ -117,7 +117,7 @@
     "behavior_cloning_weight": 0.35,
     "init_policy": "random",
     "target_update_period": 1,
-    "dataset": "control_plane/rl_agent/data/mixed_train_transitions.jsonl",
+    "dataset": "control_plane/rl_agent/data/training_dataset.jsonl",
     "split_strategy": "grouped",
     "group_by": "session_id"
   }

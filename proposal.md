@@ -42,9 +42,9 @@ Hệ thống áp dụng kiến trúc tách biệt giữa Data Plane (xử lý lu
 - High-interaction honeypot phức tạp.
 
 ## 4. Research Questions
-- RQ1: Phương pháp đề xuất có hiệu quả hơn các rule-based route hay static honeypot không?
-- RQ2: RL action có chính xác trong việc route attacker tới honeypot phù hợp không? Có giảm thiểu false positives trên benign sessions không?
-- RQ3: Độ trễ của pipeline phân tích (log aggregation, LLM inference, RL decision, policy update) có đủ thấp để hỗ trợ adaptive rerouting mà không gây ảnh hưởng đáng kể đến luồng phục vụ bình thường không?
+- RQ1: Phương pháp sử dụng LLM + RL có tốt hơn rule-based không?
+- RQ2: RL action có chính xác trong việc route attacker tới honeypot phù hợp không?
+- RQ3: Độ trễ của pipeline (log aggregation, LLM inference, RL decision, policy update) ?
 - RQ4: Khi attacker triển khai nhiều loại attack trong cùng session, hệ thống có adaptive rerouting đủ tốt và vẫn giữ service behavior ổn định/không lộ chuyển hướng không?
 
 ## 5. System Architecture

@@ -1,0 +1,6 @@
+group,outcome,sessions,percent,research_question
+Attack,Route đúng và có engagement,148,71.498,RQ2/RQ4
+Attack,Route đúng nhưng chưa có engagement,44,21.256,RQ4
+Attack,Không route đúng hoặc không route,15,7.246,RQ2
+Benign,Giữ ở normal service,44,54.321,RQ4
+Benign,Bị route nhầm vào honeypot,37,45.679,RQ4

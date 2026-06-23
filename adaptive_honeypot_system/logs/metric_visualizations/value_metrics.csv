@@ -1,6 +1,6 @@
 metric,value
-avg_requests_after_adaptive_rerouting,3.37931
-session_length_seconds_avg,5.908434
-session_length_seconds_p50,4.356903
-session_length_seconds_p95,10.576108
-session_length_seconds_max,36.013551
+avg_requests_after_adaptive_rerouting,3.28821
+session_length_seconds_min,0.157199
+session_length_seconds_median,4.488235
+session_length_seconds_avg,4.070582
+session_length_seconds_max,30.621694

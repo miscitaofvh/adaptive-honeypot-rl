@@ -42,6 +42,7 @@ control_plane/
   replay_buffer/export_replay_buffer.py
   replay_buffer/generate_web_replay_buffer.py
   replay_buffer/evaluate_metrics.py
+  rule_based_baseline/evaluate_rule_based_baseline.py
   state_builder/state_schema.py
 ```
 
@@ -201,4 +202,21 @@ Continuity is evaluated against the active route at each service event timestamp
 
 These evaluation fields are intentionally richer than the RL state; they exist for debugging/report metrics, not for direct model input.
 
-`rl_agent/build_training_dataset.py` merges synthetic and replay transitions and adds source labels. `train_offline.py` validates with a session-grouped split stratified by source and dominant attack type, then writes detailed classification/leakage metrics beside the exported model. The tracked runtime artifact is `rl_agent/artifacts/rl_agent_linear.json`; historical local model archives are intentionally not tracked.
+`rl_agent/build_training_dataset.py` builds one unified training dataset from generated and replay transitions, while still keeping source labels inside rows for validation/reporting. `train_offline.py` validates with a session-grouped split stratified by source and dominant attack type, then writes detailed classification/leakage metrics beside the exported model. The tracked runtime artifact is `rl_agent/artifacts/rl_agent_linear.json`; historical local model archives are intentionally not tracked.
+
+## Rule-Based Baseline For RQ1
+
+`rule_based_baseline/evaluate_rule_based_baseline.py` is an offline baseline only:
+
+- Reads the replay traffic manifest.
+- Uses simple regex/pattern matching over request `method`, `path`, and `body`.
+- Simulates endpoint-scoped routing without calling Docker services or HAProxy.
+- Writes RQ1 comparison artifacts under `logs/rule_based_baseline/`.
+
+Command:
+
+```bash
+make evaluate-rule-baseline
+```
+
+This baseline is intentionally isolated from runtime LLM + RL. It exists to answer whether the adaptive pipeline gives a better tradeoff than a simple rule-based analyzer/router, not to replace the production flow.

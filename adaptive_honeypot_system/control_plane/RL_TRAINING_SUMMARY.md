@@ -58,7 +58,7 @@ Không gian hành động:
 ```json
 {
   "session_id": "session_00001",
-  "source": "synthetic",
+  "source": "generated",
   "step": 0,
   "protocol": "http",
   "attack_type": "sqli",
@@ -75,9 +75,9 @@ Không gian hành động:
 Nguồn dữ liệu:
 
 ```text
-synthetic -> control_plane/rl_agent/data/fake_transitions.jsonl        (tổng hợp)
-replay    -> control_plane/rl_agent/data/replay_buffer.jsonl           (phát lại)
-mixed     -> control_plane/rl_agent/data/mixed_train_transitions.jsonl (hỗn hợp)
+generated input -> control_plane/rl_agent/data/fake_transitions.jsonl
+replay input    -> control_plane/rl_agent/data/replay_buffer.jsonl
+training set    -> control_plane/rl_agent/data/training_dataset.jsonl
 ```
 
 Tập dữ liệu huấn luyện hiện được chọn:
@@ -148,7 +148,7 @@ make mode-debug
 make generate-replay-buffer PYTHON=../.venv/bin/python RL_REPLAY_SESSIONS=240 RL_REPLAY_SEED=20260527
 ```
 
-Xây dựng tập dữ liệu hỗn hợp:
+Xây dựng training dataset thống nhất:
 
 ```bash
 cd adaptive_honeypot_system
@@ -160,7 +160,7 @@ Huấn luyện mô hình khuyến nghị:
 ```bash
 cd adaptive_honeypot_system
 python3 -B control_plane/rl_agent/train_offline.py \
-  --dataset control_plane/rl_agent/data/mixed_train_transitions.jsonl \
+  --dataset control_plane/rl_agent/data/training_dataset.jsonl \
   --output control_plane/rl_agent/artifacts/rl_agent_linear.json \
   --algorithm cql \
   --epochs 80 \

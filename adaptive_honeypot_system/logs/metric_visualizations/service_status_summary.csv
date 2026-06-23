@@ -1,0 +1,9 @@
+service_role,observed_backend,status_class,count
+honeypot,cmdi_api,2xx,151
+honeypot,sqli_api,2xx,4
+honeypot,sqli_api,5xx,160
+honeypot,ssrf_api,2xx,150
+honeypot,ssti_api,2xx,154
+real_service,normal_api,2xx,809
+real_service,normal_api,4xx,230
+real_service,normal_api,5xx,20

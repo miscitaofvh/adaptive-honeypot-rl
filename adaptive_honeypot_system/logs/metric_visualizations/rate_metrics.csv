@@ -1,5 +1,5 @@
 metric,value,percent
-honeypot_engagement_rate,0.960784,96.078
-correct_honeypot_routing_rate,0.960784,96.078
-false_rerouting_rate_on_benign_sessions,0.615385,61.538
+honeypot_engagement_rate,0.714976,71.498
+correct_honeypot_routing_rate,0.927536,92.754
+false_rerouting_rate_on_benign_sessions,0.45679,45.679
 normal_service_continuity_rate,1.0,100.0

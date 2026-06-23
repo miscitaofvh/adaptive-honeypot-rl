@@ -281,7 +281,7 @@ def generate_dataset(
 
                 payload = {
                     "session_id": f"session_{session_idx:05d}",
-                    "source": "synthetic",
+                    "source": "generated",
                     "step": step,
                     "protocol": protocol,
                     "attack_type": current_attack,
@@ -318,14 +318,14 @@ def generate_dataset(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate fake transitions for offline RL training.")
+    parser = argparse.ArgumentParser(description="Generate transitions for offline RL training.")
     parser.add_argument(
         "--output",
         type=Path,
         default=Path(__file__).resolve().parent / "data" / "fake_transitions.jsonl",
         help="Output JSONL dataset path.",
     )
-    parser.add_argument("--sessions", type=int, default=10000, help="Number of synthetic sessions.")
+    parser.add_argument("--sessions", type=int, default=10000, help="Number of generated sessions.")
     parser.add_argument("--min-steps", type=int, default=8, help="Minimum steps per session.")
     parser.add_argument("--max-steps", type=int, default=12, help="Maximum steps per session.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
@@ -347,7 +347,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    print("Fake dataset generated")
+    print("Generated dataset ready")
     print(f"- Output: {args.output}")
     print(f"- Sessions: {stats['summary']['sessions']}")
     print(f"- Transitions: {stats['summary']['transitions']}")

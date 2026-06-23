@@ -43,6 +43,7 @@ ANALYZER_WINDOW_SECONDS = int(os.getenv("ANALYZER_WINDOW_SECONDS", "300"))
 ANALYZER_MAX_EVENTS = int(os.getenv("ANALYZER_MAX_EVENTS", "150"))
 ANALYZER_APPLY_ROUTE = os.getenv("ANALYZER_APPLY_ROUTE", "true").strip().lower() in {"1", "true", "yes"}
 ANALYZER_ENABLED = os.getenv("ANALYZER_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+ANALYZER_MODE = os.getenv("ANALYZER_MODE", "llm").strip().lower()
 EXPOSURE_MODE = os.getenv("EXPOSURE_MODE", "debug").strip().lower()
 DEBUG_EXPOSURE = EXPOSURE_MODE in {"debug", "dev", "development", "operator", "test"}
 ROUTE_COOLDOWN_SECONDS = float(os.getenv("ROUTE_COOLDOWN_SECONDS", "5"))
@@ -215,6 +216,10 @@ stats: dict[str, Any] = {
     "rule_guardrail_overrides": 0,
 }
 
+if ANALYZER_MODE not in {"llm", "rule_based"}:
+    logger.warning("unsupported ANALYZER_MODE=%s, defaulting to llm", ANALYZER_MODE)
+    ANALYZER_MODE = "llm"
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -222,6 +227,7 @@ stats: dict[str, Any] = {
 
 class AnalyzerStats(BaseModel):
     enabled: bool
+    analyzer_mode: str
     state_schema: str
     state_dim: int
     elasticsearch_url: str
@@ -1101,8 +1107,12 @@ def analyze_session(session_id: str, events: list[dict]) -> dict[str, Any]:
     rule_features = compute_rule_features(session_id, events)
     rule_features["_session_id"] = session_id
 
-    llm_output = call_llm(context)
-    llm_output, semantic_source = apply_rule_guardrail(session_id, events, llm_output)
+    if ANALYZER_MODE == "rule_based":
+        llm_output = rule_based_semantic_fallback(session_id, events)
+        semantic_source = "rule_based_only"
+    else:
+        llm_output = call_llm(context)
+        llm_output, semantic_source = apply_rule_guardrail(session_id, events, llm_output)
 
     state = build_state_vector(rule_features, llm_output)
     window = context.get("window") or {}
@@ -1421,6 +1431,7 @@ def health() -> dict[str, Any]:
         return {"status": "ok"}
     return AnalyzerStats(
         enabled=ANALYZER_ENABLED,
+        analyzer_mode=ANALYZER_MODE,
         state_schema=STATE_SCHEMA_VERSION,
         state_dim=STATE_DIM,
         elasticsearch_url=ELASTICSEARCH_URL,

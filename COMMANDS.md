@@ -203,6 +203,22 @@ make visualize-metrics PYTHON=../.venv/bin/python
 sed -n '1,160p' logs/metric_visualizations/REPORT.md
 ```
 
+Generate rule-based baseline metrics for RQ1:
+
+```bash
+make evaluate-rule-baseline PYTHON=../.venv/bin/python
+sed -n '1,160p' logs/rule_based_baseline/REPORT.md
+```
+
+Output chính:
+
+```text
+logs/rule_based_baseline/REPORT.md
+logs/rule_based_baseline/rq1_comparison.csv
+logs/rule_based_baseline/rule_based_metrics.json
+logs/rule_based_baseline/rule_based_session_decisions.csv
+```
+
 For a clean batch generated with a known session prefix:
 
 ```bash

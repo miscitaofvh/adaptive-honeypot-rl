@@ -99,7 +99,7 @@ def build_dataset(
         "attack_type_counts": Counter(),
         "sessions_by_source": defaultdict(set),
         "inputs": {
-            "synthetic": str(synthetic_path),
+            "generated": str(synthetic_path),
             "replay": str(replay_path),
             "replay_repeat": replay_repeat,
         },
@@ -107,7 +107,7 @@ def build_dataset(
 
     with output_path.open("w", encoding="utf-8") as output:
         for row in read_jsonl(synthetic_path):
-            item = annotate(row, source="synthetic")
+            item = annotate(row, source="generated")
             update_summary(summary, item)
             output.write(json.dumps(item, ensure_ascii=True) + "\n")
 
@@ -127,12 +127,12 @@ def build_dataset(
 
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parent
-    parser = argparse.ArgumentParser(description="Build an annotated offline RL training dataset.")
+    parser = argparse.ArgumentParser(description="Build a unified offline RL training dataset.")
     parser.add_argument(
         "--synthetic",
         type=Path,
         default=root / "data" / "fake_transitions.jsonl",
-        help="Synthetic transition JSONL path.",
+        help="Generated transition JSONL path.",
     )
     parser.add_argument(
         "--replay",
@@ -143,8 +143,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=root / "data" / "mixed_train_transitions.jsonl",
-        help="Output JSONL path.",
+        default=root / "data" / "training_dataset.jsonl",
+        help="Unified training dataset JSONL path.",
     )
     parser.add_argument(
         "--summary",

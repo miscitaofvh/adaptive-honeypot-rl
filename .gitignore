@@ -35,3 +35,9 @@ adaptive_honeypot_system/logs/*
 !adaptive_honeypot_system/logs/llm_analyzer/llm_fields.jsonl
 !adaptive_honeypot_system/logs/metric_visualizations/
 !adaptive_honeypot_system/logs/metric_visualizations/**
+
+# Local planning/report artifacts
+IMPLEMENTATION_PLAN.md
+report-requirements.txt
+ĐACN-TrungNhan_VanHung-LLM_HoneypotDeployment/
+ĐACN_TrungNhan_VanHung_LLM_HoneypotDeployment.pdf

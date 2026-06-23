@@ -378,7 +378,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=Path,
-        default=Path(__file__).resolve().parent / "data" / "fake_transitions.jsonl",
+        default=Path(__file__).resolve().parent / "data" / "training_dataset.jsonl",
         help="Path to JSONL transitions dataset.",
     )
     parser.add_argument(

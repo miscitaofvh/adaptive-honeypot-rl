@@ -1,5 +1,5 @@
 {
-  "dataset": "control_plane/rl_agent/data/mixed_train_transitions.jsonl",
+  "dataset": "control_plane/rl_agent/data/training_dataset.jsonl",
   "model": "control_plane/rl_agent/artifacts/vm_tune_gamma_20260527_145952/random_cql_gamma0_alpha1_bc035.json",
   "algorithm": "cql",
   "epochs": 80,
@@ -21,11 +21,11 @@
     "missing_session_transitions": 0,
     "source_counts": {
       "replay": 43300,
-      "synthetic": 200117
+      "generated": 200117
     },
     "source_session_counts": {
       "replay": 240,
-      "synthetic": 20000
+      "generated": 20000
     },
     "attack_type_counts": {
       "benign": 80782,
@@ -41,12 +41,12 @@
       "replay:sqli": 10600,
       "replay:ssrf": 8700,
       "replay:ssti": 9600,
-      "synthetic:benign": 75982,
-      "synthetic:cmdi": 29783,
-      "synthetic:malformed": 10121,
-      "synthetic:sqli": 32195,
-      "synthetic:ssrf": 23823,
-      "synthetic:ssti": 28213
+      "generated:benign": 75982,
+      "generated:cmdi": 29783,
+      "generated:malformed": 10121,
+      "generated:sqli": 32195,
+      "generated:ssrf": 23823,
+      "generated:ssti": 28213
     },
     "action_counts": {
       "KEEP_NORMAL": 104867,
@@ -73,11 +73,11 @@
       "missing_session_transitions": 0,
       "source_counts": {
         "replay": 34300,
-        "synthetic": 160013
+        "generated": 160013
       },
       "source_session_counts": {
         "replay": 190,
-        "synthetic": 16000
+        "generated": 16000
       },
       "attack_type_counts": {
         "benign": 64552,
@@ -93,12 +93,12 @@
         "replay:sqli": 8400,
         "replay:ssrf": 6900,
         "replay:ssti": 7600,
-        "synthetic:benign": 60752,
-        "synthetic:cmdi": 23833,
-        "synthetic:malformed": 8142,
-        "synthetic:sqli": 25645,
-        "synthetic:ssrf": 19130,
-        "synthetic:ssti": 22511
+        "generated:benign": 60752,
+        "generated:cmdi": 23833,
+        "generated:malformed": 8142,
+        "generated:sqli": 25645,
+        "generated:ssrf": 19130,
+        "generated:ssti": 22511
       },
       "action_counts": {
         "KEEP_NORMAL": 83522,
@@ -121,11 +121,11 @@
       "missing_session_transitions": 0,
       "source_counts": {
         "replay": 9000,
-        "synthetic": 40104
+        "generated": 40104
       },
       "source_session_counts": {
         "replay": 50,
-        "synthetic": 4000
+        "generated": 4000
       },
       "attack_type_counts": {
         "benign": 16230,
@@ -141,12 +141,12 @@
         "replay:sqli": 2200,
         "replay:ssrf": 1800,
         "replay:ssti": 2000,
-        "synthetic:benign": 15230,
-        "synthetic:cmdi": 5950,
-        "synthetic:malformed": 1979,
-        "synthetic:sqli": 6550,
-        "synthetic:ssrf": 4693,
-        "synthetic:ssti": 5702
+        "generated:benign": 15230,
+        "generated:cmdi": 5950,
+        "generated:malformed": 1979,
+        "generated:sqli": 6550,
+        "generated:ssrf": 4693,
+        "generated:ssti": 5702
       },
       "action_counts": {
         "KEEP_NORMAL": 21345,
@@ -346,7 +346,7 @@
           }
         }
       },
-      "synthetic": {
+      "generated": {
         "accuracy": 0.13377663064875978,
         "avg_proxy_reward": -0.808490247667377,
         "samples": 160013,
@@ -918,7 +918,7 @@
           }
         }
       },
-      "synthetic": {
+      "generated": {
         "accuracy": 0.13464991023339318,
         "avg_proxy_reward": -0.8055592958308397,
         "samples": 40104,
@@ -1607,7 +1607,7 @@
           }
         }
       },
-      "synthetic": {
+      "generated": {
         "accuracy": 1.0,
         "avg_proxy_reward": 1.197226475348878,
         "samples": 160013,
@@ -2179,7 +2179,7 @@
           }
         }
       },
-      "synthetic": {
+      "generated": {
         "accuracy": 1.0,
         "avg_proxy_reward": 1.1992469579094354,
         "samples": 40104,

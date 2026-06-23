@@ -138,7 +138,7 @@ Các metric trong proposal hiện có đủ field để tính:
 - Real backend và honeypots có API contract tương thích.
 - LLM analyzer có Groq path và deterministic rule fallback.
 - Routing controller dùng trained JSON model, runtime không phụ thuộc torch.
-- Offline RL model CQL đã được train/tune từ mixed synthetic + replay dataset.
+- Offline RL model CQL được train/tune từ một training dataset thống nhất, được build từ generated transitions và replay transitions.
 - Replay buffer generator/exporter.
 - Metric evaluator từ host logs.
 - Current model artifact đã được track tại `adaptive_honeypot_system/control_plane/rl_agent/artifacts/rl_agent_linear.json`.

@@ -1,0 +1,6 @@
+metric_key,metric,unit,better_direction,adaptive_value,adaptive_percent,rule_based_value,rule_based_percent,adaptive_minus_rule_based,better_system
+correct_honeypot_routing_rate,Correct honeypot routing rate,percent,higher,0.927536,92.754,0.850242,85.024,0.077294,adaptive
+honeypot_engagement_rate,Honeypot engagement rate,percent,higher,0.714976,71.498,0.661836,66.184,0.05314,adaptive
+avg_requests_after_adaptive_rerouting,Avg requests after adaptive rerouting,number,higher,3.28821,,1.879581,,1.408629,adaptive
+false_rerouting_rate_on_benign_sessions,False rerouting rate on benign sessions,percent,lower,0.45679,45.679,0.358025,35.802,0.098765,rule_based
+normal_service_continuity_rate,Normal-service continuity rate,percent,higher,1.0,100.0,0.982639,98.264,0.017361,adaptive

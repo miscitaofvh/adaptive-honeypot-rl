@@ -98,7 +98,7 @@ def infer_transition_source(raw: Dict[str, object], session_id: str) -> str:
     if session_id.startswith("replay_"):
         return "replay"
     if session_id.startswith("session_"):
-        return "synthetic"
+        return "generated"
     return "unknown"
 
 

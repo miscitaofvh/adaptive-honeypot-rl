@@ -1,0 +1,4 @@
+metric,count,min_ms,avg_ms,max_ms,under_1s_percent,under_5s_percent,under_10s_percent,over_30s_percent
+analysis_duration_ms,435,161.79,1233.791,10406.58,86.897,88.506,99.77,0.0
+controller_roundtrip_ms,268,33.34,45.6,68.42,100.0,100.0,100.0,0.0
+event_to_decision_latency_ms,435,619.39,11916.596,101420.6,0.69,66.667,87.816,11.034
