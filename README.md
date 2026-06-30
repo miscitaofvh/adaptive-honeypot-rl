@@ -2,11 +2,11 @@
 
 Đồ án này là lab Web-only để tăng attacker engagement bằng adaptive honeypot routing. Hệ thống quan sát request, suy luận intent bằng LLM analyzer hoặc rule fallback, dùng RL policy chọn honeypot phù hợp, rồi route các request tiếp theo trong cùng session sang honeypot đúng loại.
 
-Lệnh vận hành/test/train nằm trong [COMMANDS.md](COMMANDS.md). Tóm tắt train RL nằm trong [RL_TRAINING_SUMMARY.md](adaptive_honeypot_system/control_plane/RL_TRAINING_SUMMARY.md). Proposal học thuật nằm trong [proposal.md](proposal.md). Plan còn lại nằm trong [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+Lệnh vận hành/test/train nằm trong [COMMANDS.md](COMMANDS.md). Tóm tắt train RL nằm trong [RL_TRAINING_SUMMARY.md](adaptive_honeypot_system/control_plane/RL_TRAINING_SUMMARY.md). Proposal học thuật nằm trong [proposal.md](proposal.md).
 
 ## Scope
 
-Đang làm:
+Trong phạm vi repo này:
 
 - Real Web service: React frontend + Flask backend.
 - Web honeypots: SQLi, SSTI, CMDi, SSRF.
@@ -16,7 +16,7 @@ Lệnh vận hành/test/train nằm trong [COMMANDS.md](COMMANDS.md). Tóm tắt
 - Offline RL training bằng torch/CQL; runtime dùng model JSON đã export.
 - Replay buffer exporter và metric evaluator từ host-mounted logs.
 
-Không làm trong phạm vi hiện tại:
+Ngoài phạm vi hiện tại:
 
 - SSH/FTP/SMTP.
 - L4 Drop-and-Catch.
@@ -127,27 +127,6 @@ Các metric trong proposal hiện có đủ field để tính:
 - Normal-service continuity rate.
 
 `evaluate_metrics.py` đọc host logs, không cần đưa các field evaluation này vào RL state.
-
-## Current Status
-
-Đã hoàn thành:
-
-- Full Web stack chạy qua Docker Compose.
-- Debug/attack exposure mode.
-- Endpoint-scoped adaptive routing.
-- Real backend và honeypots có API contract tương thích.
-- LLM analyzer có Groq path và deterministic rule fallback.
-- Routing controller dùng trained JSON model, runtime không phụ thuộc torch.
-- Offline RL model CQL được train/tune từ một training dataset thống nhất, được build từ generated transitions và replay transitions.
-- Replay buffer generator/exporter.
-- Metric evaluator từ host logs.
-- Current model artifact đã được track tại `adaptive_honeypot_system/control_plane/rl_agent/artifacts/rl_agent_linear.json`.
-
-Còn lại:
-
-- Viết báo cáo kết quả dựa trên `logs/metrics_report.json`.
-- Nếu cần cải thiện kết quả báo cáo, chạy thêm batch replay sạch rồi evaluate lại.
-- Nếu dùng Groq thật khi demo dài, polish retry/backoff và memory decay.
 
 ## Important Notes
 
